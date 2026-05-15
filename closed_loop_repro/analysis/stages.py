@@ -63,7 +63,7 @@ def detect_stages(
         if slope[idx] < -improvement_slope:
             plateau_end = idx
             break
-    if plateau_end is None and stability_crossing is not None:
+    if plateau_end is None and stability_crossing is not None and stability_crossing >= stage1_end + min_plateau:
         plateau_end = stability_crossing
     if plateau_end is None:
         plateau_end = min(len(loss) - 1, max(stage1_end + min_plateau, int(0.7 * len(loss))))

@@ -33,6 +33,14 @@ def test_stage_detection_rejects_nonfinite_loss():
     assert result.stability_crossing is None
 
 
+def test_stage_detection_allows_plateau_when_stability_crosses_at_start():
+    loss = np.r_[np.linspace(100, 10, 8), np.linspace(10, 9, 25), np.linspace(9, 8, 10)]
+    radius = np.r_[np.ones(8) * 1.1, np.ones(len(loss) - 8) * 0.9]
+    result = detect_stages(loss, radius, min_plateau=5)
+    assert result.plateau_detected
+    assert result.plateau_end - result.stage1_end >= 5
+
+
 def test_bootstrap_ci_smoke():
     mean, lo, hi = bootstrap_ci([1, 2, 3], n_boot=100, seed=0)
     assert lo <= mean <= hi
