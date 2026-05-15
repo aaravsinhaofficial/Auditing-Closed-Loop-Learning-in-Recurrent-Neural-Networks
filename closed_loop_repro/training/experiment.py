@@ -24,7 +24,8 @@ def run_pair_experiment(config: dict[str, Any], output_dir: str | Path | None = 
     start = time.time()
     seed = int(config.get("seed", 0))
     rng = seed_all(seed)
-    device = torch.device(config.get("device", "cpu"))
+    requested_device = str(config.get("device", "cuda"))
+    device = _resolve_device(requested_device)
     task = make_task(config.get("task", {"name": "double_integrator"}))
     train_cfg = config.get("training", {})
     model_cfg = config.get("model", {"name": "tanh_rnn"})
@@ -54,6 +55,8 @@ def run_pair_experiment(config: dict[str, Any], output_dir: str | Path | None = 
             records[idx]["closed_stage"] = int(label)
 
     metrics = _compute_metrics(records, stages, seed, config)
+    metrics["requested_device"] = requested_device
+    metrics["resolved_device"] = str(device)
     metrics["runtime_seconds"] = time.time() - start
 
     result_dir = _result_dir(config, output_dir)
@@ -226,6 +229,12 @@ def _optimizer(controller: nn.Module, cfg: dict[str, Any]) -> torch.optim.Optimi
     if cfg.get("optimizer", "SGD").lower() == "adam":
         return torch.optim.Adam(params, lr=lr)
     return torch.optim.SGD(params, lr=lr)
+
+
+def _resolve_device(requested: str) -> torch.device:
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        return torch.device("cpu")
+    return torch.device(requested)
 
 
 def _clip(controller: nn.Module, cfg: dict[str, Any]) -> None:

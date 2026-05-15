@@ -1,7 +1,7 @@
 experiment_name: smoke_seed_sweep
 output_dir: results/raw
 seeds: [0, 1]
-device: cpu
+device: cuda
 task:
   name: double_integrator
   dt: 1.0

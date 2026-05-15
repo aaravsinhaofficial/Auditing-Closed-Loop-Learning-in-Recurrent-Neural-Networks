@@ -2,7 +2,7 @@ experiment_name: smoke_generalization
 output_dir: results/raw
 seeds: [0]
 base:
-  device: cpu
+  device: cuda
   task:
     name: double_integrator
     dt: 1.0

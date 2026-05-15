@@ -19,6 +19,10 @@ bash scripts/run_smoke.sh
 The smoke run writes small raw outputs, claim tables, and figures using the
 same schema as the full audit.
 
+Configs default to `device: cuda`. On machines without CUDA, the runner falls
+back to CPU and records both `requested_device` and `resolved_device` in each
+`metrics.json`. To force CPU, set `device: cpu` in the relevant config.
+
 ## Full Audit
 
 ```bash
