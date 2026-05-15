@@ -24,3 +24,16 @@ results/figures/**
 # Full-run checkpoints are intentionally not tracked.
 checkpoints/
 /models/
+
+# Paper sources/build artifacts are intentionally local-only; track the final PDF.
+tmlr-style-file-main/
+paper/source/
+paper/build/
+paper/*.aux
+paper/*.bbl
+paper/*.bcf
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.run.xml
+!paper/closed_loop_rnn_audit_tmlr.pdf
