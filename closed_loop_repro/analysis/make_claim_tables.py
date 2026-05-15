@@ -34,7 +34,7 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
         empty = pd.DataFrame(columns=["claim", "description", "n", "support_fraction", "notes"])
         claim_path = out / "claim_reproducibility_matrix.csv"
         empty.to_csv(claim_path, index=False)
-        (out / "claim_reproducibility_matrix.md").write_text(empty.to_markdown(index=False), encoding="utf-8")
+        (out / "claim_reproducibility_matrix.md").write_text(_to_markdown(empty), encoding="utf-8")
         return {"claim_csv": claim_path}
 
     rows = []
@@ -50,7 +50,7 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
     claim_df = pd.DataFrame(rows)
     claim_path = out / "claim_reproducibility_matrix.csv"
     claim_df.to_csv(claim_path, index=False)
-    (out / "claim_reproducibility_matrix.md").write_text(claim_df.to_markdown(index=False), encoding="utf-8")
+    (out / "claim_reproducibility_matrix.md").write_text(_to_markdown(claim_df), encoding="utf-8")
 
     stats = {
         "n_runs": len(df),
@@ -71,6 +71,25 @@ def _numeric_row(claim: str, df: pd.DataFrame, column: str, notes: str) -> dict:
         return {"claim": claim, "description": CLAIMS[claim], "n": 0, "support_fraction": float("nan"), "notes": notes}
     mean, lo, hi = bootstrap_ci(pd.to_numeric(df[column], errors="coerce").dropna().to_numpy(), n_boot=500)
     return {"claim": claim, "description": CLAIMS[claim], "n": int(df[column].notna().sum()), "support_fraction": mean, "ci_low": lo, "ci_high": hi, "notes": notes}
+
+
+def _to_markdown(df: pd.DataFrame) -> str:
+    columns = [str(column) for column in df.columns]
+    lines = [
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join("---" for _ in columns) + " |",
+    ]
+    for _, row in df.iterrows():
+        values = [_format_markdown_value(row[column]) for column in df.columns]
+        lines.append("| " + " | ".join(values) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _format_markdown_value(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value)
+    return text.replace("|", "\\|").replace("\n", " ")
 
 
 def main() -> None:
