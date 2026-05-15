@@ -1,0 +1,3 @@
+results: results/raw
+processed: results/processed
+out: results/figures

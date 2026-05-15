@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+import time
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import torch
+from torch import nn
+
+from closed_loop_repro.analysis.gains import effective_gain, gain_distance
+from closed_loop_repro.analysis.spectra import coupled_spectral_radius, rnn_spectral_radius
+from closed_loop_repro.analysis.stages import detect_stages
+from closed_loop_repro.config import save_config
+from closed_loop_repro.io import ensure_dir, write_json
+from closed_loop_repro.models import make_controller
+from closed_loop_repro.random import clone_state_dict, seed_all
+from closed_loop_repro.tasks import make_task
+
+
+def run_pair_experiment(config: dict[str, Any], output_dir: str | Path | None = None) -> dict[str, Any]:
+    start = time.time()
+    seed = int(config.get("seed", 0))
+    rng = seed_all(seed)
+    device = torch.device(config.get("device", "cpu"))
+    task = make_task(config.get("task", {"name": "double_integrator"}))
+    train_cfg = config.get("training", {})
+    model_cfg = config.get("model", {"name": "tanh_rnn"})
+    hidden_size = int(model_cfg.get("hidden_size", train_cfg.get("hidden_size", 100)))
+    model_kwargs = {k: v for k, v in model_cfg.items() if k != "hidden_size"}
+
+    base_controller = make_controller(model_kwargs, task.obs_dim, hidden_size, task.action_dim).to(device)
+    initial_state = clone_state_dict(base_controller)
+    closed = make_controller(model_kwargs, task.obs_dim, hidden_size, task.action_dim).to(device)
+    open_student = make_controller(model_kwargs, task.obs_dim, hidden_size, task.action_dim).to(device)
+    closed.load_state_dict(initial_state)
+    open_student.load_state_dict(initial_state)
+
+    closed_history = _train_closed_loop(closed, task, train_cfg, rng, device)
+    teacher = deepcopy(closed).to(device)
+    teacher.eval()
+    open_history = _train_open_loop(open_student, teacher, task, train_cfg, rng, device)
+
+    records = _merge_histories(closed_history, open_history)
+    stages = detect_stages(
+        np.asarray([r["closed_test_loss"] for r in records]),
+        np.asarray([r["closed_coupled_radius"] for r in records]),
+        min_plateau=int(config.get("analysis", {}).get("min_plateau", 8)),
+    )
+    for idx, label in enumerate(stages.labels):
+        if idx < len(records):
+            records[idx]["closed_stage"] = int(label)
+
+    metrics = _compute_metrics(records, stages, seed, config)
+    metrics["runtime_seconds"] = time.time() - start
+
+    result_dir = _result_dir(config, output_dir)
+    ensure_dir(result_dir)
+    pd.DataFrame(records).to_csv(result_dir / "timeseries.csv", index=False)
+    write_json(metrics, result_dir / "metrics.json")
+    save_config(config, result_dir / "config.yaml")
+    return {"result_dir": str(result_dir), "metrics": metrics, "records": records}
+
+
+def _train_closed_loop(controller: nn.Module, task, cfg: dict[str, Any], rng: np.random.Generator, device: torch.device) -> list[dict[str, float]]:
+    optimizer = _optimizer(controller, cfg)
+    epochs = int(cfg.get("epochs", 1000))
+    history = []
+    for epoch in range(epochs):
+        loss = _closed_loop_loss(controller, task, cfg, rng, device)
+        if epoch > 0:
+            optimizer.zero_grad()
+            loss.backward()
+            _clip(controller, cfg)
+            optimizer.step()
+        history.append(_snapshot(epoch, "closed", float(loss.detach().cpu()), controller, task, cfg, device))
+    return history
+
+
+def _train_open_loop(student: nn.Module, teacher: nn.Module, task, cfg: dict[str, Any], rng: np.random.Generator, device: torch.device) -> list[dict[str, float]]:
+    optimizer = _optimizer(student, cfg)
+    epochs = int(cfg.get("epochs", 1000))
+    history = []
+    for epoch in range(epochs):
+        loss = _teacher_forcing_loss(student, teacher, task, cfg, rng, device)
+        if epoch > 0:
+            optimizer.zero_grad()
+            loss.backward()
+            _clip(student, cfg)
+            optimizer.step()
+        history.append(_snapshot(epoch, "open", float(loss.detach().cpu()), student, task, cfg, device))
+    return history
+
+
+def _closed_loop_loss(controller: nn.Module, task, cfg: dict[str, Any], rng: np.random.Generator, device: torch.device) -> torch.Tensor:
+    batch_size = int(cfg.get("batch_size", 64))
+    steps = int(cfg.get("steps", 50))
+    control_penalty = float(cfg.get("control_penalty", 0.005))
+    state = task.reset(batch_size, rng, device)
+    hidden = controller.initial_hidden(batch_size, device)
+    total = torch.zeros((), dtype=torch.float32, device=device)
+    for step in range(steps):
+        obs = task.observe(state, step)
+        action, hidden = controller(obs, hidden)
+        state = task.step(state, action, step)
+        total = total + task.state_cost(state, step).mean() + control_penalty * torch.mean(action**2)
+    return total / steps
+
+
+def _teacher_forcing_loss(student: nn.Module, teacher: nn.Module, task, cfg: dict[str, Any], rng: np.random.Generator, device: torch.device) -> torch.Tensor:
+    batch_size = int(cfg.get("batch_size", 64))
+    steps = int(cfg.get("steps", 50))
+    state = task.reset(batch_size, rng, device)
+    h_student = student.initial_hidden(batch_size, device)
+    h_teacher = teacher.initial_hidden(batch_size, device)
+    total = torch.zeros((), dtype=torch.float32, device=device)
+    for step in range(steps):
+        obs = task.observe(state, step)
+        with torch.no_grad():
+            teacher_action, h_teacher = teacher(obs, h_teacher)
+        student_action, h_student = student(obs, h_student)
+        total = total + torch.mean((student_action - teacher_action) ** 2)
+        with torch.no_grad():
+            state = task.step(state, teacher_action, step)
+    return total / steps
+
+
+@torch.no_grad()
+def _evaluate(controller: nn.Module, task, cfg: dict[str, Any], device: torch.device) -> dict[str, Any]:
+    eval_seed = int(cfg.get("eval_seed", 12345))
+    rng = np.random.default_rng(eval_seed)
+    batch_size = int(cfg.get("eval_batch_size", min(32, int(cfg.get("batch_size", 64)))))
+    steps = int(cfg.get("steps", 50))
+    state = task.reset(batch_size, rng, device)
+    hidden = controller.initial_hidden(batch_size, device)
+    states, controls, losses = [], [], []
+    for step in range(steps):
+        obs = task.observe(state, step)
+        action, hidden = controller(obs, hidden)
+        states.append(state.detach().cpu().numpy())
+        controls.append(action.detach().cpu().numpy())
+        state = task.step(state, action, step)
+        losses.append(float(task.state_cost(state, step).mean().detach().cpu()))
+    states_np = np.stack(states)
+    controls_np = np.stack(controls)
+    gain = effective_gain(states_np[..., : min(states_np.shape[-1], max(1, controls_np.shape[-1] + 1))], controls_np)
+    return {
+        "test_loss": float(np.mean(losses)),
+        "peak_loss": float(np.max(losses)),
+        "gain": gain,
+    }
+
+
+def _snapshot(epoch: int, mode: str, train_loss: float, controller: nn.Module, task, cfg: dict[str, Any], device: torch.device) -> dict[str, float]:
+    eval_out = _evaluate(controller, task, cfg, device)
+    gain = eval_out["gain"].reshape(-1)
+    record = {
+        "epoch": epoch,
+        f"{mode}_train_loss": train_loss,
+        f"{mode}_test_loss": eval_out["test_loss"],
+        f"{mode}_peak_loss": eval_out["peak_loss"],
+        f"{mode}_rnn_radius": rnn_spectral_radius(controller),
+        f"{mode}_coupled_radius": coupled_spectral_radius(task, controller),
+    }
+    for idx, value in enumerate(gain[: min(8, len(gain))]):
+        record[f"{mode}_gain_{idx}"] = float(value)
+    return record
+
+
+def _merge_histories(closed: list[dict[str, float]], open_loop: list[dict[str, float]]) -> list[dict[str, float]]:
+    out = []
+    for c, o in zip(closed, open_loop):
+        merged = {"epoch": c["epoch"]}
+        merged.update(c)
+        merged.update({k: v for k, v in o.items() if k != "epoch"})
+        out.append(merged)
+    return out
+
+
+def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config: dict[str, Any]) -> dict[str, Any]:
+    closed_test = np.asarray([r["closed_test_loss"] for r in records], dtype=float)
+    open_test = np.asarray([r["open_test_loss"] for r in records], dtype=float)
+    closed_radius = np.asarray([r["closed_coupled_radius"] for r in records], dtype=float)
+    closed_gain = np.asarray([[r.get(f"closed_gain_{i}", np.nan) for i in range(8)] for r in records], dtype=float)
+    open_gain = np.asarray([[r.get(f"open_gain_{i}", np.nan) for i in range(8)] for r in records], dtype=float)
+    final_gain_distance = gain_distance(np.nan_to_num(closed_gain[-1]), np.nan_to_num(open_gain[-1]))
+    initial_open = max(float(open_test[0]), 1e-12)
+    final_closed = float(closed_test[-1])
+    final_open = float(open_test[-1])
+    open_spike = bool(np.nanmax(open_test) > 2.0 * max(initial_open, final_open, 1e-12))
+    stability_crossing = stages.stability_crossing
+    plateau_exit = stages.plateau_end
+    timing_gap = None if stability_crossing is None else int(plateau_exit - stability_crossing)
+    recovered = bool(np.isfinite(final_closed) and final_closed < closed_test[0])
+    return {
+        "experiment": config.get("experiment_name", "unnamed"),
+        "seed": seed,
+        "task": config.get("task", {}).get("name", "double_integrator"),
+        "model": config.get("model", {}).get("name", "tanh_rnn"),
+        "epochs": len(records),
+        "final_closed_test_loss": final_closed,
+        "final_open_test_loss": final_open,
+        "peak_open_test_loss": float(np.nanmax(open_test)),
+        "peak_closed_test_loss": float(np.nanmax(closed_test)),
+        "trajectory_gain_distance": final_gain_distance,
+        "open_loop_test_loss_spike": open_spike,
+        "closed_loop_plateau": bool(stages.plateau_detected),
+        "plateau_length": stages.as_dict()["plateau_length"],
+        "stage1_end": stages.stage1_end,
+        "plateau_end": stages.plateau_end,
+        "stability_crossing": stability_crossing,
+        "stability_to_plateau_gap": timing_gap,
+        "final_closed_coupled_radius": float(closed_radius[-1]),
+        "closed_recovered": recovered,
+        "claim_C1_divergence": bool(final_gain_distance > 0.05 or abs(final_open - final_closed) > 0.05 * max(final_closed, 1e-12)),
+        "claim_C2_stages": bool(stages.plateau_detected),
+        "claim_C3_stability_transition": bool(stability_crossing is not None),
+    }
+
+
+def _optimizer(controller: nn.Module, cfg: dict[str, Any]) -> torch.optim.Optimizer:
+    params = [p for p in controller.parameters() if p.requires_grad]
+    lr = float(cfg.get("learning_rate", 1e-2))
+    if cfg.get("optimizer", "SGD").lower() == "adam":
+        return torch.optim.Adam(params, lr=lr)
+    return torch.optim.SGD(params, lr=lr)
+
+
+def _clip(controller: nn.Module, cfg: dict[str, Any]) -> None:
+    max_norm = cfg.get("gradient_clip", 1.0)
+    if max_norm is not None and max_norm is not False:
+        torch.nn.utils.clip_grad_norm_(controller.parameters(), max_norm=float(max_norm))
+
+
+def _result_dir(config: dict[str, Any], output_dir: str | Path | None) -> Path:
+    root = Path(output_dir or config.get("output_dir", "results/raw"))
+    experiment = config.get("experiment_name", "run")
+    seed = int(config.get("seed", 0))
+    return root / experiment / f"seed_{seed:04d}"

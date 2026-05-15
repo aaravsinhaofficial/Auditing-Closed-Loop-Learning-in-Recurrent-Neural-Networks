@@ -1,0 +1,27 @@
+experiment_name: smoke_robustness
+output_dir: results/raw
+seeds: [0]
+base:
+  device: cpu
+  task:
+    name: double_integrator
+    dt: 1.0
+    feedback_strength: 1.0
+  model:
+    name: tanh_rnn
+    hidden_size: 10
+    recurrent_scale: 0.1
+  training:
+    epochs: 3
+    batch_size: 5
+    eval_batch_size: 5
+    steps: 6
+    learning_rate: 0.01
+    optimizer: SGD
+    gradient_clip: 1.0
+    control_penalty: 0.005
+perturbations:
+  - name: original
+    patch: {}
+  - name: adam
+    patch: {training: {optimizer: Adam, learning_rate: 0.003}}

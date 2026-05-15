@@ -1,0 +1,26 @@
+.DS_Store
+.Rhistory
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Experiment outputs can be regenerated from configs.
+results/raw/**
+results/processed/**
+results/figures/**
+!results/raw/.gitkeep
+!results/processed/.gitkeep
+!results/figures/.gitkeep
+
+# Full-run checkpoints are intentionally not tracked.
+checkpoints/
+/models/

@@ -1,0 +1,41 @@
+experiment_name: generalization_maximal
+output_dir: results/raw
+seeds:
+  start: 0
+  stop: 10
+base:
+  device: cpu
+  task:
+    name: double_integrator
+    dt: 1.0
+    feedback_strength: 1.0
+  model:
+    name: tanh_rnn
+    hidden_size: 100
+    recurrent_scale: 0.1
+  training:
+    epochs: 1000
+    batch_size: 100
+    eval_batch_size: 32
+    steps: 50
+    learning_rate: 0.01
+    optimizer: SGD
+    gradient_clip: 1.0
+    control_penalty: 0.005
+variants:
+  - name: tanh_rnn
+    patch: {model: {name: tanh_rnn}}
+  - name: gru
+    patch: {model: {name: gru}, training: {learning_rate: 0.003, optimizer: Adam}}
+  - name: low_rank
+    patch: {model: {name: low_rank_rnn, rank: 1, activation: linear}}
+  - name: tracking_task
+    patch:
+      task: {name: tracking, dt: 0.1, total_time: 10.0}
+      model: {name: linear_rnn, hidden_size: 100, recurrent_scale: 0.2}
+      training: {steps: 100, learning_rate: 0.001, optimizer: Adam}
+  - name: ring_path_integration
+    patch:
+      task: {name: ring, dt: 0.1, feedback_strength: 1.0}
+      model: {name: gru, hidden_size: 64}
+      training: {steps: 80, learning_rate: 0.003, optimizer: Adam}
