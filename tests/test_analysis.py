@@ -1,6 +1,8 @@
 import numpy as np
+import pandas as pd
 
 from closed_loop_repro.analysis.gains import effective_gain
+from closed_loop_repro.analysis.make_claim_tables import make_claim_tables
 from closed_loop_repro.analysis.spectra import spectral_radius
 from closed_loop_repro.analysis.stages import detect_stages
 from closed_loop_repro.analysis.statistics import bootstrap_ci
@@ -25,6 +27,45 @@ def test_stage_detection_synthetic_plateau():
     assert result.stage1_end < result.plateau_end
 
 
+def test_stage_detection_rejects_nonfinite_loss():
+    result = detect_stages([1.0, np.nan, np.nan, np.nan], min_plateau=2)
+    assert not result.plateau_detected
+    assert result.stability_crossing is None
+
+
 def test_bootstrap_ci_smoke():
     mean, lo, hi = bootstrap_ci([1, 2, 3], n_boot=100, seed=0)
     assert lo <= mean <= hi
+
+
+def test_claim_tables_prefer_summary_csvs(tmp_path):
+    raw = tmp_path / "raw"
+    full = raw / "generalization_maximal"
+    smoke = raw / "smoke_double_integrator"
+    full.mkdir(parents=True)
+    smoke.mkdir(parents=True)
+    columns = {
+        "experiment": ["full"],
+        "seed": [0],
+        "final_closed_test_loss": [1.0],
+        "final_open_test_loss": [1.2],
+        "trajectory_gain_distance": [0.0],
+        "claim_C2_stages": [True],
+        "claim_C3_stability_transition": [False],
+        "open_loop_test_loss_spike": [True],
+        "closed_recovered": [True],
+        "final_closed_coupled_radius": [np.nan],
+        "variant": ["toy"],
+    }
+    pd.DataFrame(columns).to_csv(full / "generalization_summary.csv", index=False)
+    pd.DataFrame({**columns, "experiment": ["smoke"], "final_open_test_loss": [1.0]}).to_csv(
+        smoke / "sweep_summary.csv", index=False
+    )
+
+    paths = make_claim_tables(raw, tmp_path / "processed")
+    claim_df = pd.read_csv(paths["claim_csv"])
+    c1 = claim_df.loc[claim_df["claim"] == "C1"].iloc[0]
+    c5 = claim_df.loc[claim_df["claim"] == "C5"].iloc[0]
+    assert c1["n"] == 1
+    assert c1["support_fraction"] == 1.0
+    assert c5["n"] == 1

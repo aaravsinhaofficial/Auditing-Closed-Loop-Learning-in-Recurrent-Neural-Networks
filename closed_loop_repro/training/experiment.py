@@ -233,14 +233,19 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
     closed_gain = np.asarray([[r.get(f"closed_gain_{i}", np.nan) for i in range(8)] for r in records], dtype=float)
     open_gain = np.asarray([[r.get(f"open_gain_{i}", np.nan) for i in range(8)] for r in records], dtype=float)
     final_gain_distance = gain_distance(np.nan_to_num(closed_gain[-1]), np.nan_to_num(open_gain[-1]))
-    initial_open = max(float(open_test[0]), 1e-12)
+    initial_open = float(open_test[0]) if np.isfinite(open_test[0]) else 1e-12
     final_closed = float(closed_test[-1])
     final_open = float(open_test[-1])
-    open_spike = bool(np.nanmax(open_test) > 2.0 * max(initial_open, final_open, 1e-12))
+    finite_final_losses = bool(np.isfinite(final_closed) and np.isfinite(final_open))
+    loss_gap = final_open - final_closed
+    relative_loss_gap = loss_gap / max(abs(final_closed), 1e-12) if finite_final_losses else float("nan")
+    c1_loss_divergence = bool(finite_final_losses and relative_loss_gap > 0.05)
+    c1_gain_divergence = bool(np.isfinite(final_gain_distance) and final_gain_distance > 0.05)
+    open_spike = bool(np.any(np.isfinite(open_test)) and np.nanmax(open_test) > 2.0 * max(initial_open, final_open, 1e-12))
     stability_crossing = stages.stability_crossing
     plateau_exit = stages.plateau_end
     timing_gap = None if stability_crossing is None else int(plateau_exit - stability_crossing)
-    recovered = bool(np.isfinite(final_closed) and final_closed < closed_test[0])
+    recovered = bool(finite_final_losses and np.isfinite(closed_test[0]) and final_closed < closed_test[0])
     return {
         "experiment": config.get("experiment_name", "unnamed"),
         "seed": seed,
@@ -249,8 +254,10 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
         "epochs": len(records),
         "final_closed_test_loss": final_closed,
         "final_open_test_loss": final_open,
-        "peak_open_test_loss": float(np.nanmax(open_test)),
-        "peak_closed_test_loss": float(np.nanmax(closed_test)),
+        "peak_open_test_loss": _safe_nanmax(open_test),
+        "peak_closed_test_loss": _safe_nanmax(closed_test),
+        "deployed_loss_gap": float(loss_gap),
+        "deployed_loss_gap_relative_to_closed": float(relative_loss_gap),
         "trajectory_gain_distance": final_gain_distance,
         "open_loop_test_loss_spike": open_spike,
         "closed_loop_plateau": bool(stages.plateau_detected),
@@ -261,10 +268,20 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
         "stability_to_plateau_gap": timing_gap,
         "final_closed_coupled_radius": float(closed_radius[-1]),
         "closed_recovered": recovered,
-        "claim_C1_divergence": bool(final_gain_distance > 0.05 or abs(final_open - final_closed) > 0.05 * max(final_closed, 1e-12)),
-        "claim_C2_stages": bool(stages.plateau_detected),
-        "claim_C3_stability_transition": bool(stability_crossing is not None),
+        "finite_final_losses": finite_final_losses,
+        "claim_C1_loss_divergence": c1_loss_divergence,
+        "claim_C1_gain_divergence": c1_gain_divergence,
+        "claim_C1_divergence": bool(c1_loss_divergence or c1_gain_divergence),
+        "claim_C2_stages": bool(finite_final_losses and stages.plateau_detected),
+        "claim_C3_stability_transition": bool(np.isfinite(closed_radius[-1]) and stability_crossing is not None),
     }
+
+
+def _safe_nanmax(values: np.ndarray) -> float:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return float("nan")
+    return float(np.max(finite))
 
 
 def _optimizer(controller: nn.Module, cfg: dict[str, Any]) -> torch.optim.Optimizer:

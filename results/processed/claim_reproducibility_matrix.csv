@@ -1,6 +1,6 @@
-claim,description,n,support_fraction,notes,ci_low,ci_high
-C1,Closed-loop/open-loop divergence,299,0.8762541806020067,fraction of runs with gain/performance divergence,,
-C2,Closed-loop stages,299,0.17391304347826086,fraction with algorithmic plateau/stage detection,,
-C3,Coupled-system stability transition,299,0.8494983277591973,fraction with coupled spectral radius crossing,,
-C4,Short-term vs long-term tradeoff,254,-5.681102362204724,bootstrap CI for stability-to-plateau timing gap,-11.384645669291332,-1.0346456692913393
-C5,Generalization,0,,no generalization runs found,,
+claim,description,n,support_fraction,ci_low,ci_high,notes
+C1,Closed-loop/open-loop divergence,295,0.8576271186440678,0.823728813559322,0.8949152542372881,deployed closed-loop loss gap >5%; gain divergence reported in diagnostics
+C2,Closed-loop stages,295,0.1152542372881356,0.08135593220338982,0.14915254237288136,finite runs with algorithmic plateau/stage detection
+C3,Coupled-system stability transition,295,0.8610169491525423,0.8185593220338984,0.8983050847457628,finite coupled spectral radius crossing
+C4,Short-term vs long-term tradeoff,295,0.10847457627118644,0.07457627118644068,0.14576271186440679,open-loop deployed-loss spike plus closed-loop recovery
+C5,Generalization,50,0.76,0.64,0.88,generalization variants preserving deployed-loss divergence

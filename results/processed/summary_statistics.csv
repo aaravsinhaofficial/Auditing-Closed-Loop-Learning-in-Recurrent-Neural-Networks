@@ -1,2 +1,2 @@
-n_runs,closed_open_final_loss_corr
-299,-0.013118854511972552
+n_runs,n_finite_runs,closed_open_final_loss_corr,c1_deployed_loss_support,c1_gain_support,mean_deployed_loss_gap,mean_stability_to_plateau_gap
+295,280,-0.061085105900349025,0.8576271186440678,0.8745762711864407,10.722270503390426,-5.681102362204724

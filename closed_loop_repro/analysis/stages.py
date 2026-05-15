@@ -35,6 +35,9 @@ def detect_stages(
     if loss.ndim != 1 or len(loss) < 3:
         labels = np.ones(len(loss), dtype=int)
         return StageResult(0, len(loss), labels, False, None)
+    if not np.all(np.isfinite(loss)):
+        labels = np.ones(len(loss), dtype=int)
+        return StageResult(0, len(loss), labels, False, None)
 
     y = np.log(np.maximum(loss, 1e-12))
     y = _smooth(y, window=max(3, min(11, len(y) // 8 * 2 + 1)))
