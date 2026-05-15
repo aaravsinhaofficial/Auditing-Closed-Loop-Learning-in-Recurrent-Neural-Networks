@@ -12,6 +12,8 @@ class StageResult:
     labels: np.ndarray
     plateau_detected: bool
     stability_crossing: int | None
+    plateau_exit_detected: bool = False
+    plateau_exit_reason: str = "none"
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -20,6 +22,8 @@ class StageResult:
             "plateau_detected": bool(self.plateau_detected),
             "plateau_length": int(max(0, self.plateau_end - self.stage1_end)),
             "stability_crossing": None if self.stability_crossing is None else int(self.stability_crossing),
+            "plateau_exit_detected": bool(self.plateau_exit_detected),
+            "plateau_exit_reason": self.plateau_exit_reason,
         }
 
 
@@ -34,10 +38,10 @@ def detect_stages(
     loss = np.asarray(loss, dtype=float)
     if loss.ndim != 1 or len(loss) < 3:
         labels = np.ones(len(loss), dtype=int)
-        return StageResult(0, len(loss), labels, False, None)
+        return StageResult(0, len(loss), labels, False, None, False, "too_short")
     if not np.all(np.isfinite(loss)):
         labels = np.ones(len(loss), dtype=int)
-        return StageResult(0, len(loss), labels, False, None)
+        return StageResult(0, len(loss), labels, False, None, False, "nonfinite_loss")
 
     y = np.log(np.maximum(loss, 1e-12))
     y = _smooth(y, window=max(3, min(11, len(y) // 8 * 2 + 1)))
@@ -58,21 +62,36 @@ def detect_stages(
                     break
 
     plateau_end = None
+    plateau_exit_detected = False
+    plateau_exit_reason = "none"
     start = min(len(slope) - 1, stage1_end + min_plateau)
     for idx in range(start, len(slope)):
         if slope[idx] < -improvement_slope:
             plateau_end = idx
+            plateau_exit_detected = True
+            plateau_exit_reason = "slope"
             break
     if plateau_end is None and stability_crossing is not None and stability_crossing >= stage1_end + min_plateau:
         plateau_end = stability_crossing
+        plateau_exit_detected = True
+        plateau_exit_reason = "stability"
     if plateau_end is None:
         plateau_end = min(len(loss) - 1, max(stage1_end + min_plateau, int(0.7 * len(loss))))
+        plateau_exit_reason = "fallback"
 
     labels = np.ones(len(loss), dtype=int)
     labels[stage1_end:plateau_end] = 2
     labels[plateau_end:] = 3
     plateau_detected = plateau_end - stage1_end >= min_plateau
-    return StageResult(int(stage1_end), int(plateau_end), labels, bool(plateau_detected), stability_crossing)
+    return StageResult(
+        int(stage1_end),
+        int(plateau_end),
+        labels,
+        bool(plateau_detected),
+        stability_crossing,
+        bool(plateau_exit_detected),
+        plateau_exit_reason,
+    )
 
 
 def _smooth(values: np.ndarray, window: int) -> np.ndarray:

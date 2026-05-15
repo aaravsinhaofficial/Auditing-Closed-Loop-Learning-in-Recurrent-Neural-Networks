@@ -262,6 +262,8 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
         "open_loop_test_loss_spike": open_spike,
         "closed_loop_plateau": bool(stages.plateau_detected),
         "plateau_length": stages.as_dict()["plateau_length"],
+        "plateau_exit_detected": bool(stages.plateau_exit_detected),
+        "plateau_exit_reason": stages.plateau_exit_reason,
         "stage1_end": stages.stage1_end,
         "plateau_end": stages.plateau_end,
         "stability_crossing": stability_crossing,
@@ -273,6 +275,7 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
         "claim_C1_gain_divergence": c1_gain_divergence,
         "claim_C1_divergence": bool(c1_loss_divergence or c1_gain_divergence),
         "claim_C2_stages": bool(finite_final_losses and stages.plateau_detected),
+        "claim_C2_three_stage": bool(finite_final_losses and stages.plateau_detected and stages.plateau_exit_detected),
         "claim_C3_stability_transition": bool(np.isfinite(closed_radius[-1]) and stability_crossing is not None),
     }
 

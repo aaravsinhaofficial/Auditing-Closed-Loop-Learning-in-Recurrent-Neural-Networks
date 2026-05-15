@@ -14,6 +14,7 @@ dist/
 *.egg-info/
 
 # Experiment outputs can be regenerated from configs.
+results/*.tar.gz
 results/raw/**
 results/processed/**
 results/figures/**

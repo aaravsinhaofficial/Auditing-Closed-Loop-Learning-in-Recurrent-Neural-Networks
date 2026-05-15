@@ -59,7 +59,7 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
 
     rows = []
     rows.append(_claim_row("C1", df, "claim_C1_loss_divergence", "deployed closed-loop loss gap >5%; gain divergence reported in diagnostics"))
-    rows.append(_claim_row("C2", df, "claim_C2_stages", "finite runs with algorithmic plateau/stage detection"))
+    rows.append(_claim_row("C2", df, "claim_C2_three_stage", "finite runs with algorithmic plateau and non-fallback exit detection"))
     rows.append(_claim_row("C3", df, "claim_C3_stability_transition", "finite coupled spectral radius crossing"))
     rows.append(_claim_row("C4", df, "claim_C4_tradeoff", "open-loop deployed-loss spike plus closed-loop recovery"))
     if "variant" in df.columns:
@@ -140,6 +140,11 @@ def _add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     if "claim_C2_stages" in df.columns:
         df["claim_C2_stages"] = _bool_series(df["claim_C2_stages"]) & finite
+    if "claim_C2_three_stage" in df.columns:
+        df["claim_C2_three_stage"] = _bool_series(df["claim_C2_three_stage"]) & finite
+    elif "claim_C2_stages" in df.columns:
+        exit_detected = _bool_series(df.get("plateau_exit_detected", pd.Series(True, index=df.index))).fillna(True)
+        df["claim_C2_three_stage"] = df["claim_C2_stages"] & exit_detected
     if "claim_C3_stability_transition" in df.columns:
         radius = pd.to_numeric(df.get("final_closed_coupled_radius", pd.Series(np.nan, index=df.index)), errors="coerce")
         df["claim_C3_stability_transition"] = _bool_series(df["claim_C3_stability_transition"]) & np.isfinite(radius)

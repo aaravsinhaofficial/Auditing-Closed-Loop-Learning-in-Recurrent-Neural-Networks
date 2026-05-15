@@ -24,6 +24,8 @@ def test_stage_detection_synthetic_plateau():
     loss = np.r_[np.linspace(100, 10, 10), np.linspace(10, 9, 20), np.linspace(9, 1, 20)]
     result = detect_stages(loss, min_plateau=5)
     assert result.plateau_detected
+    assert result.plateau_exit_detected
+    assert result.plateau_exit_reason == "slope"
     assert result.stage1_end < result.plateau_end
 
 
@@ -31,6 +33,7 @@ def test_stage_detection_rejects_nonfinite_loss():
     result = detect_stages([1.0, np.nan, np.nan, np.nan], min_plateau=2)
     assert not result.plateau_detected
     assert result.stability_crossing is None
+    assert result.plateau_exit_reason == "nonfinite_loss"
 
 
 def test_stage_detection_allows_plateau_when_stability_crosses_at_start():
@@ -39,6 +42,8 @@ def test_stage_detection_allows_plateau_when_stability_crosses_at_start():
     result = detect_stages(loss, radius, min_plateau=5)
     assert result.plateau_detected
     assert result.plateau_end - result.stage1_end >= 5
+    assert result.plateau_exit_reason == "fallback"
+    assert not result.plateau_exit_detected
 
 
 def test_bootstrap_ci_smoke():
