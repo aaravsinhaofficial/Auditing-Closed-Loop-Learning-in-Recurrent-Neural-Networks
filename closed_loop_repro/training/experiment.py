@@ -16,6 +16,7 @@ from closed_loop_repro.analysis.stages import detect_stages
 from closed_loop_repro.config import save_config
 from closed_loop_repro.io import ensure_dir, write_json
 from closed_loop_repro.models import make_controller
+from closed_loop_repro.progress import Heartbeat, log
 from closed_loop_repro.random import clone_state_dict, seed_all
 from closed_loop_repro.tasks import make_task
 
@@ -28,9 +29,17 @@ def run_pair_experiment(config: dict[str, Any], output_dir: str | Path | None = 
     device = _resolve_device(requested_device)
     task = make_task(config.get("task", {"name": "double_integrator"}))
     train_cfg = config.get("training", {})
+    progress_interval = float(config.get("progress_interval_seconds", train_cfg.get("progress_interval_seconds", 30.0)))
     model_cfg = config.get("model", {"name": "tanh_rnn"})
     hidden_size = int(model_cfg.get("hidden_size", train_cfg.get("hidden_size", 100)))
     model_kwargs = {k: v for k, v in model_cfg.items() if k != "hidden_size"}
+    log(
+        "run_pair start "
+        f"experiment={config.get('experiment_name', 'unnamed')} seed={seed} "
+        f"task={config.get('task', {}).get('name', 'double_integrator')} "
+        f"model={model_cfg.get('name', 'tanh_rnn')} requested_device={requested_device} "
+        f"resolved_device={device} epochs={train_cfg.get('epochs', 1000)} steps={train_cfg.get('steps', 50)}"
+    )
 
     base_controller = make_controller(model_kwargs, task.obs_dim, hidden_size, task.action_dim).to(device)
     initial_state = clone_state_dict(base_controller)
@@ -39,10 +48,11 @@ def run_pair_experiment(config: dict[str, Any], output_dir: str | Path | None = 
     closed.load_state_dict(initial_state)
     open_student.load_state_dict(initial_state)
 
-    closed_history = _train_closed_loop(closed, task, train_cfg, rng, device)
+    run_label = f"{config.get('experiment_name', 'unnamed')} seed={seed}"
+    closed_history = _train_closed_loop(closed, task, train_cfg, rng, device, f"{run_label} closed-loop", progress_interval)
     teacher = deepcopy(closed).to(device)
     teacher.eval()
-    open_history = _train_open_loop(open_student, teacher, task, train_cfg, rng, device)
+    open_history = _train_open_loop(open_student, teacher, task, train_cfg, rng, device, f"{run_label} open-loop", progress_interval)
 
     records = _merge_histories(closed_history, open_history)
     stages = detect_stages(
@@ -64,13 +74,23 @@ def run_pair_experiment(config: dict[str, Any], output_dir: str | Path | None = 
     pd.DataFrame(records).to_csv(result_dir / "timeseries.csv", index=False)
     write_json(metrics, result_dir / "metrics.json")
     save_config(config, result_dir / "config.yaml")
+    log(f"run_pair done experiment={config.get('experiment_name', 'unnamed')} seed={seed} result_dir={result_dir}")
     return {"result_dir": str(result_dir), "metrics": metrics, "records": records}
 
 
-def _train_closed_loop(controller: nn.Module, task, cfg: dict[str, Any], rng: np.random.Generator, device: torch.device) -> list[dict[str, float]]:
+def _train_closed_loop(
+    controller: nn.Module,
+    task,
+    cfg: dict[str, Any],
+    rng: np.random.Generator,
+    device: torch.device,
+    progress_label: str,
+    progress_interval: float,
+) -> list[dict[str, float]]:
     optimizer = _optimizer(controller, cfg)
     epochs = int(cfg.get("epochs", 1000))
     history = []
+    heartbeat = Heartbeat(progress_label, epochs, progress_interval)
     for epoch in range(epochs):
         loss = _closed_loop_loss(controller, task, cfg, rng, device)
         if epoch > 0:
@@ -78,14 +98,31 @@ def _train_closed_loop(controller: nn.Module, task, cfg: dict[str, Any], rng: np
             loss.backward()
             _clip(controller, cfg)
             optimizer.step()
-        history.append(_snapshot(epoch, "closed", float(loss.detach().cpu()), controller, task, cfg, device))
+        record = _snapshot(epoch, "closed", float(loss.detach().cpu()), controller, task, cfg, device)
+        history.append(record)
+        heartbeat.maybe(
+            epoch + 1,
+            f"train_loss={record['closed_train_loss']:.6g} test_loss={record['closed_test_loss']:.6g} "
+            f"coupled_radius={record['closed_coupled_radius']:.6g}",
+        )
+    heartbeat.done()
     return history
 
 
-def _train_open_loop(student: nn.Module, teacher: nn.Module, task, cfg: dict[str, Any], rng: np.random.Generator, device: torch.device) -> list[dict[str, float]]:
+def _train_open_loop(
+    student: nn.Module,
+    teacher: nn.Module,
+    task,
+    cfg: dict[str, Any],
+    rng: np.random.Generator,
+    device: torch.device,
+    progress_label: str,
+    progress_interval: float,
+) -> list[dict[str, float]]:
     optimizer = _optimizer(student, cfg)
     epochs = int(cfg.get("epochs", 1000))
     history = []
+    heartbeat = Heartbeat(progress_label, epochs, progress_interval)
     for epoch in range(epochs):
         loss = _teacher_forcing_loss(student, teacher, task, cfg, rng, device)
         if epoch > 0:
@@ -93,7 +130,14 @@ def _train_open_loop(student: nn.Module, teacher: nn.Module, task, cfg: dict[str
             loss.backward()
             _clip(student, cfg)
             optimizer.step()
-        history.append(_snapshot(epoch, "open", float(loss.detach().cpu()), student, task, cfg, device))
+        record = _snapshot(epoch, "open", float(loss.detach().cpu()), student, task, cfg, device)
+        history.append(record)
+        heartbeat.maybe(
+            epoch + 1,
+            f"train_loss={record['open_train_loss']:.6g} test_loss={record['open_test_loss']:.6g} "
+            f"coupled_radius={record['open_coupled_radius']:.6g}",
+        )
+    heartbeat.done()
     return history
 
 

@@ -39,6 +39,18 @@ python -m closed_loop_repro.analysis.make_claim_tables --results results/raw --o
 python -m closed_loop_repro.plotting.make_all_figures --config configs/figures/tmlr.yaml
 ```
 
+For long AWS runs, use `tee` to capture the live console stream:
+
+```bash
+mkdir -p logs
+bash scripts/run_full_audit.sh 2>&1 | tee logs/full_audit.log
+```
+
+The full-audit script uses unbuffered Python output. Sweeps log each run start
+and finish, and each paired experiment emits closed-loop/open-loop training
+heartbeats every 30 seconds by default. To change the heartbeat cadence, add
+`progress_interval_seconds: 60` to a config or under its `training:` block.
+
 ## Original Artifact Audit
 
 ```bash

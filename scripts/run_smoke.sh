@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-$PWD/.cache/matplotlib}"
 mkdir -p "$MPLCONFIGDIR"
 python -m closed_loop_repro.training.run_pair --config configs/smoke/double_integrator.yaml
