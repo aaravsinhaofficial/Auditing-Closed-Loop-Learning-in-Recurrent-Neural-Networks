@@ -26,7 +26,7 @@ def make_figures(results: str | Path = "results/raw", processed: str | Path = "r
     setting_summary = _read_csv(processed / "recomputed_setting_summary.csv")
     if setting_summary is not None and not setting_summary.empty:
         paths.append(_figure_robustness_heatmap(setting_summary, out))
-        paths.append(_figure_generalization(setting_summary, out))
+        paths.append(_figure_generalization(setting_summary, processed, out))
 
     claim_path = processed / "claim_reproducibility_matrix.csv"
     if claim_path.exists():
@@ -120,6 +120,8 @@ def _figure_core_reproduction(frames: list[pd.DataFrame], processed: Path, out: 
 
 def _figure_stage_analysis(frames: list[pd.DataFrame], processed: Path, out: Path) -> Path:
     details = _read_csv(processed / "stage_changepoint_details.csv")
+    if details is not None and not details.empty and {"kind", "setting"}.issubset(details.columns):
+        details = details[(details["kind"] == "original") & (details["setting"] == "original")].copy()
     seed = int(details.iloc[0]["seed"]) if details is not None and not details.empty else int(frames[0]["seed"].iloc[0])
     frame = next((item for item in frames if int(item["seed"].iloc[0]) == seed), frames[0])
     row = details[details["seed"] == seed].iloc[0] if details is not None and not details.empty else None
@@ -128,32 +130,81 @@ def _figure_stage_analysis(frames: list[pd.DataFrame], processed: Path, out: Pat
     b1 = int(row["boundary1"]) if row is not None and np.isfinite(row["boundary1"]) else int(0.2 * len(x))
     b2 = int(row["boundary2"]) if row is not None and np.isfinite(row["boundary2"]) else int(0.7 * len(x))
 
-    fig, axes = plt.subplots(1, 2, figsize=(8.2, 3.1), gridspec_kw={"width_ratios": [1.35, 1.0]})
+    fig, axes = plt.subplots(1, 3, figsize=(11.2, 3.25), gridspec_kw={"width_ratios": [1.25, 1.0, 1.15]})
+    stage_colors = sns.color_palette("deep", 4)
     axes[0].plot(x, frame["closed_test_loss"], color=sns.color_palette("deep")[0], lw=1.8)
-    axes[0].axvline(b1, color="0.2", ls="--", lw=1.0, label=r"$\tau_1$")
-    axes[0].axvline(b2, color="0.45", ls=":", lw=1.2, label=r"$\tau_2$")
-    axes[0].axvspan(b1, b2, color=sns.color_palette("deep")[2], alpha=0.12)
+    axes[0].axvspan(b1, b2, color=stage_colors[2], alpha=0.16, label="candidate slow phase")
+    axes[0].axvline(b1, color="0.05", ls="--", lw=1.8, label=r"$\tau_1$")
+    axes[0].axvline(b2, color=stage_colors[3], ls="-.", lw=1.8, label=r"$\tau_2$")
     axes[0].set(xlabel="Epoch", ylabel="Deployed loss", yscale="log", title=f"Seed {seed}")
-    axes[0].legend(frameon=False)
+    axes[0].legend(frameon=False, fontsize=7)
 
     axes[1].plot(x, y, color="0.72", lw=1.0, label="log loss")
     for start, end, color, label in [
-        (0, b1, sns.color_palette("deep")[0], "segment 1"),
-        (b1, b2, sns.color_palette("deep")[2], "segment 2"),
-        (b2, len(x) - 1, sns.color_palette("deep")[3], "segment 3"),
+        (0, b1, stage_colors[0], "segment 1"),
+        (b1, b2, stage_colors[2], "segment 2"),
+        (b2, len(x) - 1, stage_colors[3], "segment 3"),
     ]:
         segment = (x >= start) & (x <= end)
         if np.sum(segment) >= 2:
             coeff = np.polyfit(x[segment], y[segment], 1)
             axes[1].plot(x[segment], np.polyval(coeff, x[segment]), color=color, lw=2.0, label=label)
+    axes[1].axvline(b1, color="0.05", ls="--", lw=1.2)
+    axes[1].axvline(b2, color=stage_colors[3], ls="-.", lw=1.2)
     axes[1].set(xlabel="Epoch", ylabel="log deployed loss", title="Segmented fit")
     axes[1].legend(frameon=False, fontsize=7)
+
+    _plot_stage_raster(axes[2], details, len(x), stage_colors)
     sns.despine(fig)
     fig.tight_layout()
     path = out / "figure_3_stage_analysis.png"
     fig.savefig(path, dpi=240, bbox_inches="tight")
     plt.close(fig)
     return path
+
+
+def _plot_stage_raster(ax, details: pd.DataFrame | None, n_epochs: int, colors) -> None:
+    if details is None or details.empty:
+        ax.text(0.5, 0.5, "No aggregate stage details", ha="center", va="center", transform=ax.transAxes)
+        ax.axis("off")
+        return
+    rows = details.sort_values("seed").reset_index(drop=True)
+    palette = np.array([colors[0], colors[2], colors[3]], dtype=float)
+    raster = np.zeros((len(rows), n_epochs, 3), dtype=float)
+    y_positions = np.arange(len(rows))
+    tau1 = []
+    tau2 = []
+    for row_idx, row in rows.iterrows():
+        raw_b1 = float(row.get("boundary1", n_epochs // 5))
+        raw_b2 = float(row.get("boundary2", int(0.7 * n_epochs)))
+        if not np.isfinite(raw_b1):
+            raw_b1 = n_epochs // 5
+        if not np.isfinite(raw_b2):
+            raw_b2 = int(0.7 * n_epochs)
+        b1 = int(np.clip(raw_b1, 1, n_epochs - 2))
+        b2 = int(np.clip(raw_b2, b1 + 1, n_epochs - 1))
+        raster[row_idx, :b1] = palette[0]
+        raster[row_idx, b1:b2] = palette[1]
+        raster[row_idx, b2:] = palette[2]
+        tau1.append(b1)
+        tau2.append(b2)
+    ax.imshow(raster, aspect="auto", interpolation="nearest", extent=[0, n_epochs, len(rows) - 0.5, -0.5])
+    ax.scatter(tau1, y_positions, s=9, color="0.02", linewidths=0, label=r"$\tau_1$")
+    ax.scatter(tau2, y_positions, s=12, facecolors="white", edgecolors="0.02", linewidths=0.6, label=r"$\tau_2$")
+    slow = int((rows["stage1_fast"].fillna(False) & rows["stage2_slow"].fillna(False)).sum())
+    strict = int(rows["claim_C2_changepoint_three_stage"].fillna(False).sum())
+    ax.text(
+        0.98,
+        0.05,
+        f"slow: {slow}/{len(rows)}\nstrict: {strict}/{len(rows)}",
+        transform=ax.transAxes,
+        ha="right",
+        va="bottom",
+        fontsize=7,
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "0.85", "alpha": 0.92},
+    )
+    ax.set(xlabel="Epoch", ylabel="Seed", title="All original seeds")
+    ax.legend(frameon=False, fontsize=7, loc="upper right")
 
 
 def _figure_robustness_heatmap(setting_summary: pd.DataFrame, out: Path) -> Path:
@@ -217,10 +268,13 @@ def _figure_coupled_spectra(frames: list[pd.DataFrame], processed: Path, out: Pa
     return path
 
 
-def _figure_generalization(setting_summary: pd.DataFrame, out: Path) -> Path:
+def _figure_generalization(setting_summary: pd.DataFrame, processed: Path, out: Path) -> Path:
     gen = setting_summary[setting_summary["kind"] == "generalization"].copy()
+    metrics = _read_csv(processed / "recomputed_timeseries_metrics.csv")
+    if metrics is not None and not metrics.empty:
+        metrics = metrics[metrics["kind"] == "generalization"].copy()
     labels = {
-        "tanh_rnn": "tanh",
+        "tanh_rnn": "tanh RNN",
         "gru": "GRU",
         "low_rank": "low-rank",
         "tracking_task": "tracking",
@@ -231,14 +285,49 @@ def _figure_generalization(setting_summary: pd.DataFrame, out: Path) -> Path:
     gen = gen.sort_values("setting")
     x = np.arange(len(gen))
     fig, axes = plt.subplots(1, 2, figsize=(8.0, 3.1))
-    axes[0].bar(x, gen["c1_loss_support"], color=sns.color_palette("deep", len(gen)))
+    colors = sns.color_palette("deep", len(gen))
+    axes[0].bar(x, gen["c1_loss_support"], color=colors)
+    for idx, row in gen.reset_index(drop=True).iterrows():
+        n = int(row["n"])
+        count = int(round(float(row["c1_loss_support"]) * n))
+        axes[0].text(idx, min(1.09, float(row["c1_loss_support"]) + 0.035), f"{count}/{n}", ha="center", va="bottom", fontsize=8)
     axes[0].set_xticks(x, [labels.get(str(v), str(v)) for v in gen["setting"]], rotation=25, ha="right")
-    axes[0].set(ylim=(0, 1.05), ylabel="C1 support fraction", xlabel="Variant")
-    gap = np.maximum(gen["mean_deployed_loss_gap"].to_numpy(dtype=float), 1e-5)
-    axes[1].scatter(x, gap, color=sns.color_palette("deep", len(gen)), s=48, zorder=3)
-    axes[1].vlines(x, 1e-4, gap, color="0.78", lw=1.0, zorder=2)
+    axes[0].set(ylim=(0, 1.14), ylabel="C1 support fraction", xlabel="Variant")
+
+    all_gaps = []
+    for idx, row in gen.reset_index(drop=True).iterrows():
+        setting = str(row["setting"])
+        if metrics is not None and not metrics.empty:
+            gaps = metrics[metrics["setting"] == setting]["deployed_loss_gap"].to_numpy(dtype=float)
+        else:
+            gaps = np.array([float(row["mean_deployed_loss_gap"])])
+        gaps = gaps[np.isfinite(gaps)]
+        if gaps.size == 0:
+            continue
+        all_gaps.extend(gaps.tolist())
+        offsets = np.linspace(-0.13, 0.13, len(gaps)) if len(gaps) > 1 else np.array([0.0])
+        axes[1].scatter(np.full(len(gaps), idx) + offsets, gaps, color=colors[idx], s=18, alpha=0.55, linewidths=0, zorder=2)
+        axes[1].scatter(idx, np.mean(gaps), color=colors[idx], s=62, marker="D", edgecolor="white", linewidth=0.8, zorder=4)
+    axes[1].axhline(0, color="0.2", lw=0.8)
     axes[1].set_xticks(x, [labels.get(str(v), str(v)) for v in gen["setting"]], rotation=25, ha="right")
-    axes[1].set(ylabel="Mean deployed loss gap", xlabel="Variant", yscale="log", ylim=(1e-4, max(gap) * 2.0))
+    axes[1].set_yscale("symlog", linthresh=1e-3, linscale=0.7)
+    if all_gaps:
+        max_abs = max(abs(float(np.nanmin(all_gaps))), abs(float(np.nanmax(all_gaps))))
+        min_gap = float(np.nanmin(all_gaps))
+        axes[1].set_ylim(min(-0.002, min_gap * 1.3) if min_gap < 0 else 0, max_abs * 2.0)
+    ring_rows = gen.reset_index(drop=True)
+    if "ring_path_integration" in set(ring_rows["setting"].astype(str)):
+        ring_idx = int(ring_rows.index[ring_rows["setting"].astype(str) == "ring_path_integration"][0])
+        ring_gap = float(ring_rows.iloc[ring_idx]["mean_deployed_loss_gap"])
+        axes[1].annotate(
+            "near-zero gap",
+            xy=(ring_idx, ring_gap),
+            xytext=(ring_idx - 1.35, 0.006),
+            arrowprops={"arrowstyle": "->", "lw": 0.8, "color": "0.25"},
+            fontsize=8,
+            ha="right",
+        )
+    axes[1].set(ylabel="Seed deployed-loss gap (symlog)", xlabel="Variant")
     sns.despine(fig)
     fig.tight_layout()
     path = out / "figure_6_generalization.png"
