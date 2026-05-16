@@ -34,7 +34,6 @@ checkpoints/
 
 # Paper sources/build artifacts are intentionally local-only; track the final PDF.
 tmlr-style-file-main/
-15612_Learning_Dynamics_of_RNN.pdf
 paper/source/
 paper/build/
 paper/*.aux

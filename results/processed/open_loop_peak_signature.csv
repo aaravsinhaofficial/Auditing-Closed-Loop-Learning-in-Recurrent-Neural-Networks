@@ -1,4 +1,0 @@
-source,n,post_initial_peak_support,post_initial_peak_fraction,median_peak_epoch,median_peak_ratio_to_initial,median_peak_ratio_to_final,definition
-upstream_artifact_open_curve,1,1,1.0,221.0,5.2442692256040555,80199.5891842339,post-initial peak if argmax(epoch)>0 and max loss > 1.5 * initial loss
-upstream_artifact_closed_curve,1,0,0.0,0.0,1.0,15506.021734680777,post-initial peak if argmax(epoch)>0 and max loss > 1.5 * initial loss
-independent_original_setting_open_curve,50,0,0.0,0.0,1.0,236.9851481044882,post-initial peak if argmax(epoch)>0 and max loss > 1.5 * initial loss
