@@ -1,5 +1,5 @@
 original_claim,original_evidence,our_test,result,decision
-Closed/open divergence,Main double-integrator loss/gain figures,"50 paired seeds, same initialization, deployed closed-loop loss",50/50 seeds support C1; mean loss gap 0.2186,Reproduced
-Closed-loop stage structure,Visual learning-stage plots,Derivative detector plus segmented changepoint analysis,slow phase 50/50; strict three-stage 0/50,Partially reproduced
-Coupled-system stability,Coupled eigenvalue/spectral argument,Coupled vs RNN-only spectra over 50 paired seeds,50/50 seeds cross the coupled stability boundary,Reproduced in linearizable setting
+Closed/open divergence,Main double-integrator loss/gain figures,"50 paired seeds, same initialization, deployed closed-loop loss; separate peak-signature check",50/50 seeds support final-loss gap; post-initial open-loop peak is not recovered,Partial claim-level reproduction
+Closed-loop stage structure,"Spectral stages: negative-position policy, world-model/stability phase, policy refinement",Loss-only derivative detector plus segmented changepoint analysis,loss slow phase 50/50; loss-only strict three-stage 0/50,Loss-only observer test; not a falsification of the spectral stage claim
+Coupled-system stability,Coupled eigenvalue/spectral argument,Coupled spectral radius crossing and alignment with loss changepoints,"50/50 seeds cross the coupled stability boundary, but crossing is early relative to loss-only plateau exit",Restricted support; alignment claim not reproduced by loss-only boundaries
 Broader motor-control applicability,Tracking-task extension,Tracking plus ring/path-integration variants,tracking 8/10; ring-family 4/50,Partial; boundary condition identified

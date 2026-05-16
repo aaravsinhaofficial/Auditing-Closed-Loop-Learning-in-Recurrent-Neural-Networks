@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import pickle
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,9 @@ def make_supplemental_audit_tables(
         "stage_sensitivity_csv": processed / "stage_sensitivity.csv",
         "tradeoff_components_csv": processed / "tradeoff_component_summary.csv",
         "core_seed_summary_csv": processed / "core_seed_summary.csv",
+        "open_loop_peak_csv": processed / "open_loop_peak_signature.csv",
+        "stability_alignment_csv": processed / "stability_alignment_summary.csv",
+        "loss_scale_csv": processed / "loss_scale_comparison.csv",
     }
     _run_accounting(metrics).to_csv(outputs["run_accounting_csv"], index=False)
     _original_vs_reproduction(metrics, processed).to_csv(outputs["original_vs_reproduction_csv"], index=False)
@@ -40,6 +44,9 @@ def make_supplemental_audit_tables(
     _stage_sensitivity(results).to_csv(outputs["stage_sensitivity_csv"], index=False)
     _tradeoff_components(metrics).to_csv(outputs["tradeoff_components_csv"], index=False)
     _core_seed_summary(metrics).to_csv(outputs["core_seed_summary_csv"], index=False)
+    _open_loop_peak_signature(results, metrics).to_csv(outputs["open_loop_peak_csv"], index=False)
+    _stability_alignment(metrics, processed).to_csv(outputs["stability_alignment_csv"], index=False)
+    _loss_scale_comparison(results, metrics).to_csv(outputs["loss_scale_csv"], index=False)
     return outputs
 
 
@@ -82,23 +89,23 @@ def _original_vs_reproduction(metrics: pd.DataFrame, processed: Path) -> pd.Data
             {
                 "original_claim": "Closed/open divergence",
                 "original_evidence": "Main double-integrator loss/gain figures",
-                "our_test": "50 paired seeds, same initialization, deployed closed-loop loss",
-                "result": f"{int(original['claim_C1_loss_divergence'].sum())}/{len(original)} seeds support C1; mean loss gap {original['deployed_loss_gap'].mean():.4f}",
-                "decision": "Reproduced",
+                "our_test": "50 paired seeds, same initialization, deployed closed-loop loss; separate peak-signature check",
+                "result": f"{int(original['claim_C1_loss_divergence'].sum())}/{len(original)} seeds support final-loss gap; post-initial open-loop peak is not recovered",
+                "decision": "Partial claim-level reproduction",
             },
             {
                 "original_claim": "Closed-loop stage structure",
-                "original_evidence": "Visual learning-stage plots",
-                "our_test": "Derivative detector plus segmented changepoint analysis",
-                "result": f"slow phase {int(original['claim_C2_plateau_present'].sum())}/{len(original)}; strict three-stage {int(original['claim_C2_three_stage'].sum())}/{len(original)}",
-                "decision": "Partially reproduced",
+                "original_evidence": "Spectral stages: negative-position policy, world-model/stability phase, policy refinement",
+                "our_test": "Loss-only derivative detector plus segmented changepoint analysis",
+                "result": f"loss slow phase {int(original['claim_C2_plateau_present'].sum())}/{len(original)}; loss-only strict three-stage {int(original['claim_C2_three_stage'].sum())}/{len(original)}",
+                "decision": "Loss-only observer test; not a falsification of the spectral stage claim",
             },
             {
                 "original_claim": "Coupled-system stability",
                 "original_evidence": "Coupled eigenvalue/spectral argument",
-                "our_test": "Coupled vs RNN-only spectra over 50 paired seeds",
-                "result": f"{int(original['claim_C3_stability_transition'].sum())}/{len(original)} seeds cross the coupled stability boundary",
-                "decision": "Reproduced in linearizable setting",
+                "our_test": "Coupled spectral radius crossing and alignment with loss changepoints",
+                "result": f"{int(original['claim_C3_stability_transition'].sum())}/{len(original)} seeds cross the coupled stability boundary, but crossing is early relative to loss-only plateau exit",
+                "decision": "Restricted support; alignment claim not reproduced by loss-only boundaries",
             },
             {
                 "original_claim": "Broader motor-control applicability",
@@ -154,9 +161,9 @@ def _artifact_manifest() -> pd.DataFrame:
             {
                 "component": "Supplemental audit tables",
                 "file_or_script": "python -m closed_loop_repro.analysis.supplemental_audit_tables --results results/raw --processed results/processed",
-                "produces": "run accounting, original-vs-reproduction, A1 split, C2 sensitivity",
+                "produces": "run accounting, original-vs-reproduction, A1 split, C2 sensitivity, peak/alignment/scale checks",
                 "runtime": "<1 min",
-                "expected_output": "results/processed/{run_accounting,original_vs_reproduction,tradeoff_component_summary,stage_sensitivity}.csv",
+                "expected_output": "results/processed/{run_accounting,original_vs_reproduction,tradeoff_component_summary,stage_sensitivity,open_loop_peak_signature,stability_alignment_summary,loss_scale_comparison}.csv",
             },
             {
                 "component": "Figure build",
@@ -205,6 +212,160 @@ def _stage_sensitivity(results: Path) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _open_loop_peak_signature(results: Path, metrics: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    original_artifact = _artifact_loss_curve("open")
+    if original_artifact is not None:
+        rows.append(_peak_row("upstream_artifact_open_curve", original_artifact, n=1))
+    closed_artifact = _artifact_loss_curve("closed")
+    if closed_artifact is not None:
+        rows.append(_peak_row("upstream_artifact_closed_curve", closed_artifact, n=1))
+
+    independent = []
+    for path in sorted((results / "original_double_integrator_full").glob("seed_*/timeseries.csv")):
+        frame = pd.read_csv(path)
+        independent.append(frame["open_test_loss"].to_numpy(dtype=float))
+    if independent:
+        peak_ratios_initial = []
+        peak_ratios_final = []
+        peak_epochs = []
+        post_initial_support = 0
+        for curve in independent:
+            peak_epoch = int(np.nanargmax(curve))
+            peak = float(np.nanmax(curve))
+            initial = float(curve[0])
+            final = float(curve[-1])
+            peak_ratios_initial.append(peak / max(initial, 1e-12))
+            peak_ratios_final.append(peak / max(final, 1e-12))
+            peak_epochs.append(peak_epoch)
+            post_initial_support += int(peak_epoch > 0 and peak > 1.5 * max(initial, 1e-12))
+        rows.append(
+            {
+                "source": "independent_original_setting_open_curve",
+                "n": len(independent),
+                "post_initial_peak_support": post_initial_support,
+                "post_initial_peak_fraction": post_initial_support / len(independent),
+                "median_peak_epoch": float(np.nanmedian(peak_epochs)),
+                "median_peak_ratio_to_initial": float(np.nanmedian(peak_ratios_initial)),
+                "median_peak_ratio_to_final": float(np.nanmedian(peak_ratios_final)),
+                "definition": "post-initial peak if argmax(epoch)>0 and max loss > 1.5 * initial loss",
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _peak_row(source: str, curve: np.ndarray, n: int) -> dict[str, Any]:
+    curve = np.asarray(curve, dtype=float)
+    peak_epoch = int(np.nanargmax(curve))
+    peak = float(np.nanmax(curve))
+    initial = float(curve[0])
+    final = float(curve[-1])
+    support = int(peak_epoch > 0 and peak > 1.5 * max(initial, 1e-12))
+    return {
+        "source": source,
+        "n": n,
+        "post_initial_peak_support": support,
+        "post_initial_peak_fraction": float(support),
+        "median_peak_epoch": float(peak_epoch),
+        "median_peak_ratio_to_initial": peak / max(initial, 1e-12),
+        "median_peak_ratio_to_final": peak / max(final, 1e-12),
+        "definition": "post-initial peak if argmax(epoch)>0 and max loss > 1.5 * initial loss",
+    }
+
+
+def _artifact_loss_curve(name: str) -> np.ndarray | None:
+    path = Path("external/original_artifact/data") / f"non_linear_{name}.pkl"
+    if not path.exists():
+        return None
+    with path.open("rb") as handle:
+        obj = pickle.load(handle)
+    if isinstance(obj, tuple) and len(obj) >= 2:
+        return np.asarray(obj[1], dtype=float)
+    return None
+
+
+def _stability_alignment(metrics: pd.DataFrame, processed: Path) -> pd.DataFrame:
+    original = metrics[metrics["kind"] == "original"].copy()
+    details = _read_csv(processed / "stage_changepoint_details.csv")
+    if details is not None:
+        details = details[details["kind"] == "original"][["seed", "boundary1", "boundary2"]]
+        original = original.merge(details, on="seed", how="left")
+    rows = []
+    for label, boundary in [
+        ("loss_stage1_boundary", "stage1_end"),
+        ("loss_plateau_fallback_end", "plateau_end"),
+        ("changepoint_boundary1", "boundary1"),
+        ("changepoint_boundary2", "boundary2"),
+    ]:
+        if boundary not in original:
+            continue
+        gap = pd.to_numeric(original[boundary], errors="coerce") - pd.to_numeric(original["stability_crossing"], errors="coerce")
+        rows.append(
+            {
+                "comparison": label,
+                "n": int(gap.notna().sum()),
+                "median_boundary_epoch": float(pd.to_numeric(original[boundary], errors="coerce").median()),
+                "median_stability_crossing_epoch": float(pd.to_numeric(original["stability_crossing"], errors="coerce").median()),
+                "median_boundary_minus_stability": float(gap.median()),
+                "iqr_low_gap": float(gap.quantile(0.25)),
+                "iqr_high_gap": float(gap.quantile(0.75)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _loss_scale_comparison(results: Path, metrics: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for name in ["closed", "open"]:
+        curve = _artifact_loss_curve(name)
+        if curve is not None:
+            rows.append(
+                {
+                    "source": f"upstream_artifact_{name}",
+                    "n": 1,
+                    "initial_loss": float(curve[0]),
+                    "final_loss": float(curve[-1]),
+                    "min_loss": float(np.nanmin(curve)),
+                    "max_loss": float(np.nanmax(curve)),
+                    "note": "precomputed upstream artifact curve; original notebook metric/normalization",
+                }
+            )
+    original = metrics[metrics["kind"] == "original"]
+    if not original.empty:
+        rows.extend(
+            [
+                {
+                    "source": "independent_closed_mean",
+                    "n": int(len(original)),
+                    "initial_loss": _mean_initial_loss(results, "closed_test_loss"),
+                    "final_loss": float(original["final_closed_test_loss"].mean()),
+                    "min_loss": float(original["final_closed_test_loss"].min()),
+                    "max_loss": float(original["peak_closed_test_loss"].max()),
+                    "note": "independent implementation; mean deployed loss with repository evaluation convention",
+                },
+                {
+                    "source": "independent_open_mean",
+                    "n": int(len(original)),
+                    "initial_loss": _mean_initial_loss(results, "open_test_loss"),
+                    "final_loss": float(original["final_open_test_loss"].mean()),
+                    "min_loss": float(original["final_open_test_loss"].min()),
+                    "max_loss": float(original["peak_open_test_loss"].max()),
+                    "note": "independent implementation; mean deployed loss with repository evaluation convention",
+                },
+            ]
+        )
+    return pd.DataFrame(rows)
+
+
+def _mean_initial_loss(results: Path, column: str) -> float:
+    values = []
+    for path in sorted((results / "original_double_integrator_full").glob("seed_*/timeseries.csv")):
+        frame = pd.read_csv(path)
+        values.append(float(frame[column].iloc[0]))
+    return float(np.mean(values)) if values else float("nan")
 
 
 def _stage_variant(

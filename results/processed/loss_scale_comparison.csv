@@ -1,0 +1,5 @@
+source,n,initial_loss,final_loss,min_loss,max_loss,note
+upstream_artifact_closed,1,96918.484375,6.250377178192139,6.18304967880249,96918.484375,precomputed upstream artifact curve; original notebook metric/normalization
+upstream_artifact_open,1,96918.484375,6.337521553039551,6.334264278411865,508266.625,precomputed upstream artifact curve; original notebook metric/normalization
+independent_closed_mean,50,44201.39483035526,0.09330635309931018,0.0923356497605216,607877.4748668552,independent implementation; mean deployed loss with repository evaluation convention
+independent_open_mean,50,44201.39483035526,0.31193904015060103,0.2607102992629825,607877.4748668552,independent implementation; mean deployed loss with repository evaluation convention
