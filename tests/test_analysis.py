@@ -93,13 +93,13 @@ def test_claim_tables_prefer_summary_csvs(tmp_path):
     paths = make_claim_tables(raw, tmp_path / "processed")
     claim_df = pd.read_csv(paths["claim_csv"])
     c1 = claim_df.loc[claim_df["claim"] == "C1"].iloc[0]
-    c5 = claim_df.loc[claim_df["claim"] == "C5"].iloc[0]
+    a2 = claim_df.loc[claim_df["claim"] == "A2"].iloc[0]
     assert c1["n"] == 1
     assert c1["support_fraction"] == 1.0
-    assert c5["n"] == 1
+    assert a2["n"] == 1
 
 
-def test_claim_tables_use_targeted_tradeoff_summary_for_c4(tmp_path):
+def test_claim_tables_use_targeted_tradeoff_summary_for_a1(tmp_path):
     raw = tmp_path / "raw" / "tradeoff_control_penalty_horizon"
     raw.mkdir(parents=True)
     pd.DataFrame(
@@ -114,6 +114,6 @@ def test_claim_tables_use_targeted_tradeoff_summary_for_c4(tmp_path):
     ).to_csv(raw / "tradeoff_summary.csv", index=False)
     paths = make_claim_tables(tmp_path / "raw", tmp_path / "processed")
     claim_df = pd.read_csv(paths["claim_csv"])
-    c4 = claim_df.loc[claim_df["claim"] == "C4"].iloc[0]
-    assert c4["n"] == 2
-    assert c4["support_fraction"] == 0.5
+    a1 = claim_df.loc[claim_df["claim"] == "A1"].iloc[0]
+    assert a1["n"] == 2
+    assert a1["support_fraction"] == 0.5

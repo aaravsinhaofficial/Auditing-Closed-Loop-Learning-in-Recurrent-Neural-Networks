@@ -39,7 +39,7 @@ def make_figures(results: str | Path = "results/raw", processed: str | Path = "r
         plot_df = claim_df.copy()
         plot_df["support_fraction"] = pd.to_numeric(plot_df["support_fraction"], errors="coerce")
         ax.bar(plot_df["claim"], plot_df["support_fraction"].fillna(0.0), color=sns.color_palette("deep", len(plot_df)))
-        ax.set(ylim=(0, 1), ylabel="Support fraction", xlabel="Claim")
+        ax.set(ylim=(0, 1), ylabel="Support fraction", xlabel="Claim/audit item")
         sns.despine(fig)
         path = out / "figure_5_claim_matrix.png"
         fig.savefig(path, dpi=200, bbox_inches="tight")
@@ -97,7 +97,11 @@ def _plot_median_band(ax, epochs: np.ndarray, values: np.ndarray, label: str, co
     lo = np.nanquantile(values, 0.25, axis=0)
     hi = np.nanquantile(values, 0.75, axis=0)
     ax.plot(epochs, median, label=label, color=color, lw=2.0)
-    ax.fill_between(epochs, lo, hi, color=color, alpha=0.18, lw=0)
+    ax.fill_between(epochs, lo, hi, color=color, alpha=0.24, lw=0)
+
+
+def _panel_label(ax, label: str) -> None:
+    ax.text(-0.12, 1.06, label, transform=ax.transAxes, fontsize=10, fontweight="bold", va="top", ha="left")
 
 
 def _figure_core_reproduction(frames: list[pd.DataFrame], processed: Path, out: Path) -> Path:
@@ -108,6 +112,8 @@ def _figure_core_reproduction(frames: list[pd.DataFrame], processed: Path, out: 
     final_df = final_df[final_df["kind"] == "original"] if final_df is not None else pd.DataFrame()
 
     fig, axes = plt.subplots(1, 2, figsize=(8.2, 3.1), gridspec_kw={"width_ratios": [1.45, 1.0]})
+    _panel_label(axes[0], "(a)")
+    _panel_label(axes[1], "(b)")
     _plot_median_band(axes[0], epochs, closed, "Closed-loop trained", colors[0])
     _plot_median_band(axes[0], epochs, open_loop, "Open-loop trained", colors[3])
     axes[0].set(xlabel="Epoch", ylabel="Deployed closed-loop loss", yscale="log")
@@ -148,6 +154,8 @@ def _figure_stage_analysis(frames: list[pd.DataFrame], processed: Path, out: Pat
     b2 = int(row["boundary2"]) if row is not None and np.isfinite(row["boundary2"]) else int(0.7 * len(x))
 
     fig, axes = plt.subplots(1, 3, figsize=(11.2, 3.25), gridspec_kw={"width_ratios": [1.25, 1.0, 1.15]})
+    for label, ax in zip(["(a)", "(b)", "(c)"], axes, strict=False):
+        _panel_label(ax, label)
     stage_colors = sns.color_palette("deep", 4)
     axes[0].plot(x, frame["closed_test_loss"], color=sns.color_palette("deep")[0], lw=1.8)
     axes[0].axvspan(b1, b2, color=stage_colors[2], alpha=0.16, label="candidate slow phase")
@@ -248,12 +256,30 @@ def _figure_robustness_heatmap(setting_summary: pd.DataFrame, out: Path) -> Path
         "C2 slow": "c2_plateau_support",
         "C2 strict": "c2_three_stage_support",
         "C3 stability": "c3_stability_support",
-        "C4 proxy": "c4_proxy_support",
+        "A1 proxy": "c4_proxy_support",
     }
     heat = rob.set_index("setting")[[*columns.values()]].rename(columns={v: k for k, v in columns.items()})
+    failure_rows = heat.index.astype(str) == "no_clip"
+    mask = np.tile(failure_rows[:, None], (1, heat.shape[1]))
     fig, ax = plt.subplots(figsize=(7.4, 4.2))
-    sns.heatmap(heat, ax=ax, vmin=0, vmax=1, cmap="viridis", annot=True, fmt=".2g", cbar_kws={"label": "Support fraction"})
-    ax.set(xlabel="Claim diagnostic", ylabel="Perturbation")
+    sns.heatmap(
+        heat,
+        ax=ax,
+        vmin=0,
+        vmax=1,
+        cmap="viridis",
+        annot=True,
+        fmt=".2g",
+        mask=mask,
+        cbar_kws={"label": "Support fraction"},
+    )
+    for row_idx, failed in enumerate(failure_rows):
+        if not failed:
+            continue
+        for col_idx in range(heat.shape[1]):
+            ax.add_patch(plt.Rectangle((col_idx, row_idx), 1, 1, facecolor="0.82", edgecolor="0.35", hatch="///", lw=0.5))
+            ax.text(col_idx + 0.5, row_idx + 0.5, "F", ha="center", va="center", color="0.1", fontsize=9, fontweight="bold")
+    ax.set(xlabel="Claim/audit diagnostic", ylabel="Perturbation")
     fig.tight_layout()
     path = out / "figure_4_robustness_heatmap.png"
     fig.savefig(path, dpi=240, bbox_inches="tight")
@@ -281,13 +307,15 @@ def _figure_tradeoff(tradeoff: pd.DataFrame, out: Path) -> Path:
     x = np.arange(len(summary))
     colors = sns.color_palette("deep", len(summary))
     fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.1), gridspec_kw={"width_ratios": [0.95, 1.35]})
+    _panel_label(axes[0], "(a)")
+    _panel_label(axes[1], "(b)")
     axes[0].bar(x, summary["support"], color=colors)
     for idx, row in summary.iterrows():
         n = int(row["n"])
         count = int(round(float(row["support"]) * n))
         axes[0].text(idx, min(1.09, float(row["support"]) + 0.035), f"{count}/{n}", ha="center", va="bottom", fontsize=8)
     axes[0].set_xticks(x, labels, rotation=25, ha="right")
-    axes[0].set(ylim=(0, 1.14), xlabel=r"Control penalty $\lambda_u$", ylabel="C4 support fraction")
+    axes[0].set(ylim=(0, 1.14), xlabel=r"Control penalty $\lambda_u$", ylabel="A1 support fraction")
 
     for idx, row in summary.reset_index(drop=True).iterrows():
         condition = row["tradeoff_condition"]
@@ -334,16 +362,30 @@ def _figure_coupled_spectra(frames: list[pd.DataFrame], processed: Path, out: Pa
     _, rnn = _stack(frames, "closed_rnn_radius")
     metrics = _read_csv(processed / "recomputed_timeseries_metrics.csv")
     crossings = metrics[metrics["kind"] == "original"]["stability_crossing"].dropna().to_numpy(dtype=float) if metrics is not None else []
-    fig, ax = plt.subplots(figsize=(6.2, 3.4))
-    _plot_median_band(ax, epochs, coupled, r"$\rho_{\mathrm{coup}}$", colors[0])
-    _plot_median_band(ax, epochs, rnn, r"$\rho_{\mathrm{RNN}}$", colors[4])
-    ax.axhline(1.0, color="0.15", ls="--", lw=1.0)
+    fig, axes = plt.subplots(1, 2, figsize=(8.2, 3.25), gridspec_kw={"width_ratios": [1.45, 0.9]})
+    _panel_label(axes[0], "(a)")
+    _panel_label(axes[1], "(b)")
+    ax = axes[0]
+    _plot_median_band(ax, epochs, coupled, r"$\rho_{\mathrm{coup}}$ median/IQR", colors[0])
+    _plot_median_band(ax, epochs, rnn, r"$\rho_{\mathrm{RNN}}$ median/IQR", colors[4])
+    ax.axhline(1.0, color="0.15", ls="--", lw=1.0, label=r"$\rho=1$ stability boundary")
     if len(crossings):
         median_cross = float(np.nanmedian(crossings))
         ax.axvline(median_cross, color=colors[3], ls=":", lw=1.4)
+        ax.plot(crossings, np.full_like(crossings, 0.035, dtype=float), "|", color=colors[3], ms=7, alpha=0.65)
         ax.text(median_cross + 18, 0.08, f"median crossing: {median_cross:.0f}", color=colors[3], fontsize=8)
     ax.set(xlabel="Epoch", ylabel="Spectral radius", ylim=(0, max(1.25, np.nanquantile(coupled, 0.98) * 1.05)))
-    ax.legend(frameon=True, facecolor="white", edgecolor="none", loc="upper right")
+    ax.legend(frameon=True, facecolor="white", edgecolor="none", loc="upper right", fontsize=7)
+
+    hist_ax = axes[1]
+    if len(crossings):
+        bins = np.arange(np.nanmin(crossings) - 0.5, np.nanmax(crossings) + 1.5, 2)
+        hist_ax.hist(crossings, bins=bins, color=colors[3], alpha=0.75, edgecolor="white")
+        hist_ax.axvline(np.nanmedian(crossings), color="0.1", ls="--", lw=1.0)
+        hist_ax.set(xlabel="Crossing epoch", ylabel="Seeds", title="Stability crossings")
+    else:
+        hist_ax.text(0.5, 0.5, "No crossings", ha="center", va="center", transform=hist_ax.transAxes)
+        hist_ax.set_axis_off()
     sns.despine(fig)
     fig.tight_layout()
     path = out / "figure_5_coupled_spectral_analysis.png"
@@ -379,6 +421,8 @@ def _figure_generalization(setting_summary: pd.DataFrame, processed: Path, out: 
     gen = gen.sort_values("setting")
     x = np.arange(len(gen))
     fig, axes = plt.subplots(1, 2, figsize=(8.0, 3.1))
+    _panel_label(axes[0], "(a)")
+    _panel_label(axes[1], "(b)")
     colors = sns.color_palette("deep", len(gen))
     axes[0].bar(x, gen["c1_loss_support"], color=colors)
     for idx, row in gen.reset_index(drop=True).iterrows():

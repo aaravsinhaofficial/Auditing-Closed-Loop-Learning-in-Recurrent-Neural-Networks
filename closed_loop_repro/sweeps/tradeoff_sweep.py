@@ -149,7 +149,7 @@ def _corr(x: np.ndarray, y: np.ndarray) -> float:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run C4 short-vs-long horizon tradeoff sweep.")
+    parser = argparse.ArgumentParser(description="Run the short-vs-long horizon tradeoff audit.")
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
     rows = run_tradeoff_sweep(load_config(args.config))

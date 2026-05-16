@@ -238,8 +238,8 @@ def _claim_matrix(df: pd.DataFrame) -> pd.DataFrame:
     if not c4_df.empty:
         rows.append(
             _claim_row(
-                "C4",
-                "Short-term vs long-term tradeoff",
+                "A1",
+                "Protocol robustness and short/long horizon tradeoff",
                 c4_df,
                 "claim_C4_tradeoff_quantified",
                 "targeted short-vs-long horizon tradeoff sweep",
@@ -248,8 +248,8 @@ def _claim_matrix(df: pd.DataFrame) -> pd.DataFrame:
     else:
         rows.append(
             _claim_row(
-                "C4",
-                "Short-term vs long-term tradeoff",
+                "A1",
+                "Protocol robustness and short/long horizon tradeoff",
                 df,
                 "claim_C4_proxy",
                 "proxy only: open-loop deployed spike plus closed-loop recovery",
@@ -258,8 +258,8 @@ def _claim_matrix(df: pd.DataFrame) -> pd.DataFrame:
     gen = df[df["kind"] == "generalization"]
     rows.append(
         _claim_row(
-            "C5",
-            "Generalization",
+            "A2",
+            "Broader generalization",
             gen,
             "claim_C1_loss_divergence",
             "generalization variants preserving deployed-loss divergence",

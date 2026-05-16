@@ -51,23 +51,23 @@ and finish, and each paired experiment emits closed-loop/open-loop training
 heartbeats every 30 seconds by default. To change the heartbeat cadence, add
 `progress_interval_seconds: 60` to a config or under its `training:` block.
 
-## Targeted C2/C4/C5 Follow-Up Runs
+## Targeted C2/A1/A2 Follow-Up Runs
 
 The full audit already reproduces the main C1/C3 result. The targeted script
-adds the missing experiments for the more delicate claims:
+adds experiments for the more delicate stage claim and the two audit questions:
 
 ```bash
-bash scripts/run_targeted_c2_c4_c5.sh 2>&1 | tee logs/targeted_c2_c4_c5.log
+bash scripts/run_targeted_c2_a1_a2.sh 2>&1 | tee logs/targeted_c2_a1_a2.log
 ```
 
 Equivalent individual commands:
 
 ```bash
-# C4: short-vs-long horizon tradeoff over control penalties.
+# A1: short-vs-long horizon tradeoff over control penalties.
 python -m closed_loop_repro.sweeps.tradeoff_sweep \
   --config configs/tradeoff/control_penalty_horizon.yaml
 
-# C5: harder path-integration generalization with partial observation and moving targets.
+# A2: harder path-integration generalization with partial observation and moving targets.
 python -m closed_loop_repro.sweeps.generalization_sweep \
   --config configs/generalization/path_integration_hard.yaml
 
@@ -81,9 +81,9 @@ python -m closed_loop_repro.analysis.recompute_timeseries_metrics \
   --out results/processed
 ```
 
-The C4 sweep writes `results/raw/tradeoff_control_penalty_horizon/tradeoff_summary.csv`.
+The A1 sweep writes `results/raw/tradeoff_control_penalty_horizon/tradeoff_summary.csv`.
 The C2 analyzer writes `results/processed/stage_changepoint_summary.csv` and
-`results/processed/stage_changepoint_details.csv`. The harder C5 run writes
+`results/processed/stage_changepoint_details.csv`. The harder A2 run writes
 new `generalization_ring_partial_obs_*` per-seed outputs and updates the
 generalization summaries when metrics are recomputed.
 
@@ -97,15 +97,15 @@ This creates `reproduction_log.md` with a static inventory, dependency notes,
 pickle-load checks, and notebook status. Exact notebook execution can be run
 manually with `jupyter nbconvert --execute` from `external/original_artifact/code`.
 
-## Claims
+## Claims and Audit Questions
 
-The package reports claim-level outcomes for:
+The package separates original reproduction claims from audit questions:
 
 - C1: closed-loop/open-loop divergence.
 - C2: closed-loop stage structure.
 - C3: coupled-system stability transition.
-- C4: short-term vs long-term tradeoff.
-- C5: generalization across architectures and tasks.
+- A1: protocol robustness and short-vs-long horizon tradeoff.
+- A2: broader generalization across architectures and tasks.
 
 Raw per-run outputs are written under `results/raw/`, processed claim tables
 under `results/processed/`, and generated figures under `results/figures/`.

@@ -14,8 +14,8 @@ CLAIMS = {
     "C1": "Closed-loop/open-loop divergence",
     "C2": "Closed-loop stages",
     "C3": "Coupled-system stability transition",
-    "C4": "Short-term vs long-term tradeoff",
-    "C5": "Generalization",
+    "A1": "Protocol robustness and short/long horizon tradeoff",
+    "A2": "Broader generalization",
 }
 
 
@@ -63,13 +63,13 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
     rows.append(_claim_row("C3", df, "claim_C3_stability_transition", "finite coupled spectral radius crossing"))
     if "claim_C4_tradeoff_quantified" in df and df["claim_C4_tradeoff_quantified"].notna().any():
         c4_df = df[df["claim_C4_tradeoff_quantified"].notna()]
-        rows.append(_claim_row("C4", c4_df, "claim_C4_tradeoff_quantified", "targeted short-vs-long horizon tradeoff sweep"))
+        rows.append(_claim_row("A1", c4_df, "claim_C4_tradeoff_quantified", "targeted short-vs-long horizon tradeoff sweep"))
     else:
-        rows.append(_claim_row("C4", df, "claim_C4_tradeoff", "proxy only: open-loop deployed-loss spike plus closed-loop recovery"))
+        rows.append(_claim_row("A1", df, "claim_C4_tradeoff", "proxy only: open-loop deployed-loss spike plus closed-loop recovery"))
     if "variant" in df.columns:
-        rows.append(_claim_row("C5", df[df["variant"].notna()], "claim_C1_loss_divergence", "generalization variants preserving deployed-loss divergence"))
+        rows.append(_claim_row("A2", df[df["variant"].notna()], "claim_C1_loss_divergence", "generalization variants preserving deployed-loss divergence"))
     else:
-        rows.append({"claim": "C5", "description": CLAIMS["C5"], "n": 0, "support_fraction": float("nan"), "notes": "no generalization runs found"})
+        rows.append({"claim": "A2", "description": CLAIMS["A2"], "n": 0, "support_fraction": float("nan"), "notes": "no generalization runs found"})
 
     claim_df = pd.DataFrame(rows)
     claim_path = out / "claim_reproducibility_matrix.csv"
