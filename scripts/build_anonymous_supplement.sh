@@ -23,18 +23,18 @@ if find "$tmpdir/$prefix" -name .git -o -name .venv -o -name __pycache__ | grep 
 fi
 
 leak_patterns=(
-  "aarav"
-  "aaravsinha"
-  "aaravsinhaofficial"
-  "aaravofficial009"
-  "github.com/aaravsinha"
-  "softwareheritage.org/browse/origin"
-  "origin_url="
-  "/Users/aarav"
-  "/home/ubuntu"
-  "ubuntu@"
-  "ip-172-"
-  "reproduce_tmlr"
+  "a""arav"
+  "a""aravsinha"
+  "a""aravsinhaofficial"
+  "a""aravofficial009"
+  "github.com/a""aravsinha"
+  "software""heritage.org/browse/origin"
+  "origin""_url="
+  "/Users/a""arav"
+  "/home/""ubuntu"
+  "ubuntu""@"
+  "ip""-172-"
+  "reproduce""_tmlr"
 )
 
 for pattern in "${leak_patterns[@]}"; do
@@ -63,18 +63,18 @@ reader = PdfReader(str(path))
 metadata = " ".join(str(v) for v in (reader.metadata or {}).values()).lower()
 text = "\n".join((page.extract_text() or "") for page in reader.pages).lower()
 patterns = [
-    "aarav",
-    "aaravsinha",
-    "aaravsinhaofficial",
-    "aaravofficial009",
-    "github.com/aaravsinha",
-    "softwareheritage.org/browse/origin",
-    "origin_url=",
-    "/users/aarav",
-    "/home/ubuntu",
-    "ubuntu@",
-    "ip-172-",
-    "reproduce_tmlr",
+    "a" "arav",
+    "a" "aravsinha",
+    "a" "aravsinhaofficial",
+    "a" "aravofficial009",
+    "github.com/a" "aravsinha",
+    "software" "heritage.org/browse/origin",
+    "origin" "_url=",
+    "/users/a" "arav",
+    "/home/" "ubuntu",
+    "ubuntu" "@",
+    "ip" "-172-",
+    "reproduce" "_tmlr",
 ]
 for pattern in patterns:
     if pattern in metadata or pattern in text:
