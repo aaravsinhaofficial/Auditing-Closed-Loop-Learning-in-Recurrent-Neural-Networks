@@ -1,6 +1,6 @@
 claim,description,n,support_fraction,ci_low,ci_high,notes
-C1,Closed-loop/open-loop divergence,295,0.8576271186440678,0.823728813559322,0.8949152542372881,deployed closed-loop loss gap >5%; gain divergence reported in diagnostics
-C2,Closed-loop stages,295,0.1152542372881356,0.08135593220338982,0.14915254237288136,finite runs with algorithmic plateau/stage detection
-C3,Coupled-system stability transition,295,0.8610169491525423,0.8185593220338984,0.8983050847457628,finite coupled spectral radius crossing
-C4,Short-term vs long-term tradeoff,295,0.10847457627118644,0.07457627118644068,0.14576271186440679,open-loop deployed-loss spike plus closed-loop recovery
-C5,Generalization,50,0.76,0.64,0.88,generalization variants preserving deployed-loss divergence
+C1,Closed-loop/open-loop divergence,455,0.8285714285714286,0.7912087912087912,0.8593406593406593,deployed closed-loop loss gap >5%; gain divergence reported in diagnostics
+C2,Closed-loop stages,455,0.04835164835164835,0.03076923076923077,0.06813186813186813,finite runs with algorithmic plateau and non-fallback exit detection
+C3,Coupled-system stability transition,455,0.8219780219780219,0.7834615384615384,0.8549450549450549,finite coupled spectral radius crossing
+C4,Short-term vs long-term tradeoff,120,1.0,1.0,1.0,targeted short-vs-long horizon tradeoff sweep
+C5,Generalization,90,0.4666666666666667,0.36666666666666664,0.5666666666666667,generalization variants preserving deployed-loss divergence
