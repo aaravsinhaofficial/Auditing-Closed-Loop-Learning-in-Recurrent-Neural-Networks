@@ -1,0 +1,5 @@
+results: results/raw
+out: results/processed
+experiment_glob: original_double_integrator_full
+min_segment: 20
+stride: 2

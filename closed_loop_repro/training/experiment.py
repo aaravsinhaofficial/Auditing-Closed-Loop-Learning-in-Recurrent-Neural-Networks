@@ -98,7 +98,16 @@ def _train_closed_loop(
             loss.backward()
             _clip(controller, cfg)
             optimizer.step()
-        record = _snapshot(epoch, "closed", float(loss.detach().cpu()), controller, task, cfg, device)
+        record = _snapshot(
+            epoch,
+            "closed",
+            float(loss.detach().cpu()),
+            controller,
+            task,
+            cfg,
+            device,
+            _should_eval_extra_horizons(epoch, epochs, cfg),
+        )
         history.append(record)
         heartbeat.maybe(
             epoch + 1,
@@ -130,7 +139,16 @@ def _train_open_loop(
             loss.backward()
             _clip(student, cfg)
             optimizer.step()
-        record = _snapshot(epoch, "open", float(loss.detach().cpu()), student, task, cfg, device)
+        record = _snapshot(
+            epoch,
+            "open",
+            float(loss.detach().cpu()),
+            student,
+            task,
+            cfg,
+            device,
+            _should_eval_extra_horizons(epoch, epochs, cfg),
+        )
         history.append(record)
         heartbeat.maybe(
             epoch + 1,
@@ -175,11 +193,11 @@ def _teacher_forcing_loss(student: nn.Module, teacher: nn.Module, task, cfg: dic
 
 
 @torch.no_grad()
-def _evaluate(controller: nn.Module, task, cfg: dict[str, Any], device: torch.device) -> dict[str, Any]:
+def _evaluate(controller: nn.Module, task, cfg: dict[str, Any], device: torch.device, steps_override: int | None = None) -> dict[str, Any]:
     eval_seed = int(cfg.get("eval_seed", 12345))
     rng = np.random.default_rng(eval_seed)
     batch_size = int(cfg.get("eval_batch_size", min(32, int(cfg.get("batch_size", 64)))))
-    steps = int(cfg.get("steps", 50))
+    steps = int(steps_override if steps_override is not None else cfg.get("steps", 50))
     state = task.reset(batch_size, rng, device)
     hidden = controller.initial_hidden(batch_size, device)
     states, controls, losses = [], [], []
@@ -200,7 +218,16 @@ def _evaluate(controller: nn.Module, task, cfg: dict[str, Any], device: torch.de
     }
 
 
-def _snapshot(epoch: int, mode: str, train_loss: float, controller: nn.Module, task, cfg: dict[str, Any], device: torch.device) -> dict[str, float]:
+def _snapshot(
+    epoch: int,
+    mode: str,
+    train_loss: float,
+    controller: nn.Module,
+    task,
+    cfg: dict[str, Any],
+    device: torch.device,
+    eval_extra_horizons: bool = True,
+) -> dict[str, float]:
     eval_out = _evaluate(controller, task, cfg, device)
     gain = eval_out["gain"].reshape(-1)
     record = {
@@ -213,7 +240,30 @@ def _snapshot(epoch: int, mode: str, train_loss: float, controller: nn.Module, t
     }
     for idx, value in enumerate(gain[: min(8, len(gain))]):
         record[f"{mode}_gain_{idx}"] = float(value)
+    if eval_extra_horizons:
+        default_steps = int(cfg.get("steps", 50))
+        for horizon in _evaluation_horizons(cfg):
+            if horizon == default_steps:
+                horizon_out = eval_out
+            else:
+                horizon_out = _evaluate(controller, task, cfg, device, steps_override=horizon)
+            record[f"{mode}_test_loss_T{horizon}"] = horizon_out["test_loss"]
+            record[f"{mode}_peak_loss_T{horizon}"] = horizon_out["peak_loss"]
     return record
+
+
+def _evaluation_horizons(cfg: dict[str, Any]) -> list[int]:
+    horizons = cfg.get("evaluation_horizons", [])
+    if horizons is None:
+        return []
+    return sorted({int(horizon) for horizon in horizons if int(horizon) > 0})
+
+
+def _should_eval_extra_horizons(epoch: int, epochs: int, cfg: dict[str, Any]) -> bool:
+    if not _evaluation_horizons(cfg):
+        return False
+    interval = int(cfg.get("horizon_eval_interval", 1))
+    return epoch == epochs - 1 or interval <= 1 or epoch % interval == 0
 
 
 def _merge_histories(closed: list[dict[str, float]], open_loop: list[dict[str, float]]) -> list[dict[str, float]]:

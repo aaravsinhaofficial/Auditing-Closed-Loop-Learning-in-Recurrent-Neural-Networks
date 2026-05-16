@@ -19,7 +19,7 @@ CLAIMS = {
 }
 
 
-SUMMARY_FILENAMES = {"sweep_summary.csv", "robustness_summary.csv", "generalization_summary.csv"}
+SUMMARY_FILENAMES = {"sweep_summary.csv", "robustness_summary.csv", "generalization_summary.csv", "tradeoff_summary.csv"}
 
 
 def collect_metrics(root: str | Path) -> pd.DataFrame:
@@ -61,7 +61,11 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
     rows.append(_claim_row("C1", df, "claim_C1_loss_divergence", "deployed closed-loop loss gap >5%; gain divergence reported in diagnostics"))
     rows.append(_claim_row("C2", df, "claim_C2_three_stage", "finite runs with algorithmic plateau and non-fallback exit detection"))
     rows.append(_claim_row("C3", df, "claim_C3_stability_transition", "finite coupled spectral radius crossing"))
-    rows.append(_claim_row("C4", df, "claim_C4_tradeoff", "open-loop deployed-loss spike plus closed-loop recovery"))
+    if "claim_C4_tradeoff_quantified" in df and df["claim_C4_tradeoff_quantified"].notna().any():
+        c4_df = df[df["claim_C4_tradeoff_quantified"].notna()]
+        rows.append(_claim_row("C4", c4_df, "claim_C4_tradeoff_quantified", "targeted short-vs-long horizon tradeoff sweep"))
+    else:
+        rows.append(_claim_row("C4", df, "claim_C4_tradeoff", "proxy only: open-loop deployed-loss spike plus closed-loop recovery"))
     if "variant" in df.columns:
         rows.append(_claim_row("C5", df[df["variant"].notna()], "claim_C1_loss_divergence", "generalization variants preserving deployed-loss divergence"))
     else:
@@ -152,6 +156,11 @@ def _add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
     open_spike = _bool_series(df.get("open_loop_test_loss_spike", pd.Series(False, index=df.index))).fillna(False)
     recovered = _bool_series(df.get("closed_recovered", pd.Series(False, index=df.index))).fillna(False)
     df["claim_C4_tradeoff"] = finite & open_spike & recovered
+    if "claim_C4_tradeoff_quantified" in df.columns:
+        nonmissing = df["claim_C4_tradeoff_quantified"].notna()
+        quantified = pd.Series(np.nan, index=df.index, dtype=object)
+        quantified.loc[nonmissing] = _bool_series(df.loc[nonmissing, "claim_C4_tradeoff_quantified"])
+        df["claim_C4_tradeoff_quantified"] = quantified
     return df
 
 

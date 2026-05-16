@@ -1,0 +1,2 @@
+kind,setting,n,valid_n,changepoint_three_stage_support,median_boundary1,median_boundary2,median_three_vs_two_sse_reduction,median_stage1_slope,median_stage2_slope,median_stage3_slope
+original,original,50,50,0.0,40.0,255.0,0.43114100971571356,-0.11311065822278034,-0.002288831589281855,-0.0003601927920093877

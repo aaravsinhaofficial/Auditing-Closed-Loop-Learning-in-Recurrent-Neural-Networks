@@ -4,6 +4,7 @@ import pandas as pd
 from closed_loop_repro.analysis.gains import effective_gain
 from closed_loop_repro.analysis.make_claim_tables import make_claim_tables
 from closed_loop_repro.analysis.spectra import spectral_radius
+from closed_loop_repro.analysis.stage_changepoints import _analyze_one
 from closed_loop_repro.analysis.stages import detect_stages
 from closed_loop_repro.analysis.statistics import bootstrap_ci
 
@@ -51,6 +52,20 @@ def test_bootstrap_ci_smoke():
     assert lo <= mean <= hi
 
 
+def test_stage_changepoint_synthetic_three_stage():
+    x = np.arange(180)
+    y = np.r_[
+        8.0 - 0.08 * x[:50],
+        4.0 - 0.002 * np.arange(70),
+        3.86 - 0.03 * np.arange(60),
+    ]
+    result = _analyze_one(np.exp(y), min_segment=15, stride=1)
+    assert result["valid"]
+    assert result["claim_C2_changepoint_three_stage"]
+    assert 35 <= result["boundary1"] <= 65
+    assert 105 <= result["boundary2"] <= 135
+
+
 def test_claim_tables_prefer_summary_csvs(tmp_path):
     raw = tmp_path / "raw"
     full = raw / "generalization_maximal"
@@ -82,3 +97,23 @@ def test_claim_tables_prefer_summary_csvs(tmp_path):
     assert c1["n"] == 1
     assert c1["support_fraction"] == 1.0
     assert c5["n"] == 1
+
+
+def test_claim_tables_use_targeted_tradeoff_summary_for_c4(tmp_path):
+    raw = tmp_path / "raw" / "tradeoff_control_penalty_horizon"
+    raw.mkdir(parents=True)
+    pd.DataFrame(
+        {
+            "experiment": ["tradeoff_control_penalty_0", "tradeoff_control_penalty_0p05"],
+            "seed": [0, 0],
+            "final_closed_test_loss": [1.0, 1.0],
+            "final_open_test_loss": [1.2, 1.2],
+            "trajectory_gain_distance": [0.0, 0.0],
+            "claim_C4_tradeoff_quantified": [True, False],
+        }
+    ).to_csv(raw / "tradeoff_summary.csv", index=False)
+    paths = make_claim_tables(tmp_path / "raw", tmp_path / "processed")
+    claim_df = pd.read_csv(paths["claim_csv"])
+    c4 = claim_df.loc[claim_df["claim"] == "C4"].iloc[0]
+    assert c4["n"] == 2
+    assert c4["support_fraction"] == 0.5

@@ -7,5 +7,8 @@ python -m closed_loop_repro.training.run_pair --config configs/smoke/double_inte
 python -m closed_loop_repro.sweeps.seed_sweep --config configs/smoke/seed_sweep.yaml
 python -m closed_loop_repro.sweeps.robustness_sweep --config configs/smoke/robustness.yaml
 python -m closed_loop_repro.sweeps.generalization_sweep --config configs/smoke/generalization.yaml
+python -m closed_loop_repro.sweeps.tradeoff_sweep --config configs/smoke/tradeoff.yaml
 python -m closed_loop_repro.analysis.make_claim_tables --results results/raw --out results/processed
+python -m closed_loop_repro.analysis.recompute_timeseries_metrics --results results/raw --out results/processed
+python -m closed_loop_repro.analysis.stage_changepoints --results results/raw --out results/processed --experiment-glob "smoke_*" --min-segment 2 --stride 1
 python -m closed_loop_repro.plotting.make_all_figures --config configs/figures/tmlr.yaml

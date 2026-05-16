@@ -24,3 +24,14 @@ def test_controller_output_shapes():
     action, hidden = model(torch.zeros(4, task.obs_dim), hidden)
     assert action.shape == (4, task.action_dim)
     assert hidden.shape == (4, 8)
+
+
+def test_ring_partial_observation_shape_and_moving_target():
+    task = make_task({"name": "ring", "observe_velocity": False, "moving_target": True})
+    rng = np.random.default_rng(0)
+    state = task.reset(3, rng, torch.device("cpu"))
+    obs0 = task.observe(state, 0)
+    obs1 = task.observe(state, 10)
+    assert task.obs_dim == 2
+    assert obs0.shape == (3, 2)
+    assert not torch.allclose(obs0, obs1)

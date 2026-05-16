@@ -1,0 +1,45 @@
+experiment_name: generalization_path_integration_hard
+output_dir: results/raw
+seeds:
+  start: 0
+  stop: 20
+base:
+  device: cuda
+  progress_interval_seconds: 30
+  task:
+    name: ring
+    dt: 0.1
+    feedback_strength: 1.0
+    observation_noise: 0.0
+    observe_velocity: false
+    moving_target: true
+    target_amplitude: 1.2
+    target_frequency: 0.04
+    velocity_penalty: 0.05
+  model:
+    name: gru
+    hidden_size: 64
+  training:
+    epochs: 1000
+    batch_size: 100
+    eval_batch_size: 32
+    steps: 100
+    learning_rate: 0.003
+    optimizer: Adam
+    gradient_clip: 1.0
+    control_penalty: 0.002
+  analysis:
+    min_plateau: 8
+variants:
+  - name: ring_partial_obs_gru
+    patch:
+      model: {name: gru, hidden_size: 64}
+  - name: ring_partial_obs_tanh
+    patch:
+      model:
+        name: tanh_rnn
+        hidden_size: 100
+        recurrent_scale: 0.1
+      training:
+        learning_rate: 0.01
+        optimizer: SGD

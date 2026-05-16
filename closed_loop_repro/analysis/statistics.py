@@ -30,4 +30,6 @@ def pearson(x, y) -> float:
     mask = np.isfinite(x) & np.isfinite(y)
     if np.sum(mask) < 2:
         return float("nan")
+    if np.std(x[mask]) <= 1e-12 or np.std(y[mask]) <= 1e-12:
+        return float("nan")
     return float(np.corrcoef(x[mask], y[mask])[0, 1])

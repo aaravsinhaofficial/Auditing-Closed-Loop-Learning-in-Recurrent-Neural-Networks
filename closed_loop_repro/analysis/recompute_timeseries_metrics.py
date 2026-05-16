@@ -125,6 +125,8 @@ def _classify_experiment(experiment: str) -> tuple[str, str]:
         return "robustness", experiment.removeprefix("robustness_")
     if experiment.startswith("generalization_"):
         return "generalization", experiment.removeprefix("generalization_")
+    if experiment.startswith("tradeoff_"):
+        return "tradeoff", experiment.removeprefix("tradeoff_")
     return "other", experiment
 
 

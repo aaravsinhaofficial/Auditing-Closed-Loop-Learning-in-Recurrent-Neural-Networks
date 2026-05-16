@@ -51,6 +51,42 @@ and finish, and each paired experiment emits closed-loop/open-loop training
 heartbeats every 30 seconds by default. To change the heartbeat cadence, add
 `progress_interval_seconds: 60` to a config or under its `training:` block.
 
+## Targeted C2/C4/C5 Follow-Up Runs
+
+The full audit already reproduces the main C1/C3 result. The targeted script
+adds the missing experiments for the more delicate claims:
+
+```bash
+bash scripts/run_targeted_c2_c4_c5.sh 2>&1 | tee logs/targeted_c2_c4_c5.log
+```
+
+Equivalent individual commands:
+
+```bash
+# C4: short-vs-long horizon tradeoff over control penalties.
+python -m closed_loop_repro.sweeps.tradeoff_sweep \
+  --config configs/tradeoff/control_penalty_horizon.yaml
+
+# C5: harder path-integration generalization with partial observation and moving targets.
+python -m closed_loop_repro.sweeps.generalization_sweep \
+  --config configs/generalization/path_integration_hard.yaml
+
+# C2: segmented-regression changepoint analysis of stage boundaries.
+python -m closed_loop_repro.analysis.stage_changepoints \
+  --config configs/stage/changepoint_original.yaml
+
+# Refresh timeseries-derived metrics after per-seed outputs are available.
+python -m closed_loop_repro.analysis.recompute_timeseries_metrics \
+  --results results/raw \
+  --out results/processed
+```
+
+The C4 sweep writes `results/raw/tradeoff_control_penalty_horizon/tradeoff_summary.csv`.
+The C2 analyzer writes `results/processed/stage_changepoint_summary.csv` and
+`results/processed/stage_changepoint_details.csv`. The harder C5 run writes
+new `generalization_ring_partial_obs_*` per-seed outputs and updates the
+generalization summaries when metrics are recomputed.
+
 ## Original Artifact Audit
 
 ```bash

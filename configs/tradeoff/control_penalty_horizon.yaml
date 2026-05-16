@@ -1,0 +1,36 @@
+experiment_name: tradeoff_control_penalty_horizon
+output_dir: results/raw
+seeds:
+  start: 0
+  stop: 20
+control_penalties: [0.0, 0.001, 0.005, 0.02, 0.05, 0.1]
+base:
+  device: cuda
+  progress_interval_seconds: 30
+  task:
+    name: double_integrator
+    dt: 1.0
+    feedback_strength: 1.0
+    observation_noise: 0.0
+  model:
+    name: tanh_rnn
+    hidden_size: 100
+    recurrent_scale: 0.1
+    input_scale: 1.0
+    output_scale: 1.0
+    leak: 1.0
+  training:
+    epochs: 1000
+    batch_size: 100
+    eval_batch_size: 32
+    steps: 50
+    evaluation_horizons: [10, 50, 200]
+    horizon_eval_interval: 5
+    learning_rate: 0.01
+    optimizer: SGD
+    gradient_clip: 1.0
+    control_penalty: 0.005
+  analysis:
+    min_plateau: 8
+    tradeoff_min_log_improvement: 0.005
+    tradeoff_min_log_worsening: 0.005
