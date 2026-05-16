@@ -107,6 +107,7 @@ def _recompute_one(path: Path) -> dict[str, Any] | None:
     row["claim_C2_three_stage"] = bool(finite_final_losses and stages.plateau_detected and stages.plateau_exit_detected)
     row["claim_C3_stability_transition"] = bool(np.isfinite(final_radius) and stages.stability_crossing is not None)
     row["claim_C4_proxy"] = bool(finite_final_losses and open_spike and recovered)
+    row.update(_recompute_tradeoff_metrics(df, config))
     return row
 
 
@@ -141,6 +142,53 @@ def _safe_nanmax(values: np.ndarray) -> float:
     if finite.size == 0:
         return float("nan")
     return float(np.max(finite))
+
+
+def _recompute_tradeoff_metrics(df: pd.DataFrame, config: dict[str, Any]) -> dict[str, Any]:
+    horizons = sorted({int(horizon) for horizon in config.get("training", {}).get("evaluation_horizons", []) if int(horizon) > 0})
+    if len(horizons) < 2:
+        return {"claim_C4_tradeoff_quantified": np.nan}
+    short, long = min(horizons), max(horizons)
+    short_col = f"closed_test_loss_T{short}"
+    long_col = f"closed_test_loss_T{long}"
+    if short_col not in df or long_col not in df:
+        return {"claim_C4_tradeoff_quantified": np.nan}
+    eval_df = df[["epoch", short_col, long_col, "closed_coupled_radius"]].dropna()
+    if len(eval_df) < 4:
+        return {"claim_C4_tradeoff_quantified": False, "tradeoff_evaluable": False}
+
+    short_loss = eval_df[short_col].to_numpy(dtype=float)
+    long_loss = eval_df[long_col].to_numpy(dtype=float)
+    radius = eval_df["closed_coupled_radius"].to_numpy(dtype=float)
+    finite = np.isfinite(short_loss) & np.isfinite(long_loss) & np.isfinite(radius)
+    if np.sum(finite) < 4:
+        return {"claim_C4_tradeoff_quantified": False, "tradeoff_evaluable": False}
+    short_loss = short_loss[finite]
+    long_loss = long_loss[finite]
+    radius = radius[finite]
+
+    log_short = np.log(np.maximum(short_loss, 1e-12))
+    log_long = np.log(np.maximum(long_loss, 1e-12))
+    d_short = np.diff(log_short)
+    d_long = np.diff(log_long)
+    d_radius = np.diff(radius)
+    min_improvement = float(config.get("analysis", {}).get("tradeoff_min_log_improvement", 0.005))
+    min_worsening = float(config.get("analysis", {}).get("tradeoff_min_log_worsening", 0.005))
+    myopic_improvement = d_short < -min_improvement
+    tradeoff_steps = myopic_improvement & ((d_long > min_worsening) | (d_radius > 0))
+    improvement_count = int(np.sum(myopic_improvement))
+    tradeoff_count = int(np.sum(tradeoff_steps))
+    conditional = float(tradeoff_count / improvement_count) if improvement_count else 0.0
+    return {
+        "tradeoff_evaluable": True,
+        "short_horizon": int(short),
+        "long_horizon": int(long),
+        "tradeoff_step_count": tradeoff_count,
+        "myopic_improvement_step_count": improvement_count,
+        "tradeoff_fraction": float(np.mean(tradeoff_steps)) if tradeoff_steps.size else float("nan"),
+        "conditional_tradeoff_fraction": conditional,
+        "claim_C4_tradeoff_quantified": bool(conditional >= 0.1 and tradeoff_count >= 3),
+    }
 
 
 def _stage_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -185,14 +233,28 @@ def _claim_matrix(df: pd.DataFrame) -> pd.DataFrame:
             "claim_C3_stability_transition",
             "finite coupled spectral radius crossing",
         ),
-        _claim_row(
-            "C4",
-            "Short-term vs long-term tradeoff",
-            df,
-            "claim_C4_proxy",
-            "proxy only: open-loop deployed spike plus closed-loop recovery",
-        ),
     ]
+    c4_df = df[df.get("claim_C4_tradeoff_quantified", pd.Series(np.nan, index=df.index)).notna()]
+    if not c4_df.empty:
+        rows.append(
+            _claim_row(
+                "C4",
+                "Short-term vs long-term tradeoff",
+                c4_df,
+                "claim_C4_tradeoff_quantified",
+                "targeted short-vs-long horizon tradeoff sweep",
+            )
+        )
+    else:
+        rows.append(
+            _claim_row(
+                "C4",
+                "Short-term vs long-term tradeoff",
+                df,
+                "claim_C4_proxy",
+                "proxy only: open-loop deployed spike plus closed-loop recovery",
+            )
+        )
     gen = df[df["kind"] == "generalization"]
     rows.append(
         _claim_row(
@@ -233,6 +295,7 @@ def _setting_summary(df: pd.DataFrame) -> pd.DataFrame:
                 "c2_plateau_support": float(group["claim_C2_plateau_present"].mean()),
                 "c3_stability_support": float(group["claim_C3_stability_transition"].mean()),
                 "c4_proxy_support": float(group["claim_C4_proxy"].mean()),
+                "c4_tradeoff_support": float(pd.to_numeric(group.get("claim_C4_tradeoff_quantified", pd.Series(np.nan, index=group.index)), errors="coerce").mean()),
                 "mean_final_closed_test_loss": float(pd.to_numeric(group["final_closed_test_loss"], errors="coerce").mean()),
                 "mean_final_open_test_loss": float(pd.to_numeric(group["final_open_test_loss"], errors="coerce").mean()),
                 "mean_deployed_loss_gap": float(pd.to_numeric(group["deployed_loss_gap"], errors="coerce").mean()),

@@ -23,6 +23,10 @@ def make_figures(results: str | Path = "results/raw", processed: str | Path = "r
         paths.append(_figure_stage_analysis(original, processed, out))
         paths.append(_figure_coupled_spectra(original, processed, out))
 
+    tradeoff = _load_tradeoff_summary(results)
+    if tradeoff is not None and not tradeoff.empty:
+        paths.append(_figure_tradeoff(tradeoff, out))
+
     setting_summary = _read_csv(processed / "recomputed_setting_summary.csv")
     if setting_summary is not None and not setting_summary.empty:
         paths.append(_figure_robustness_heatmap(setting_summary, out))
@@ -66,6 +70,19 @@ def _read_csv(path: Path) -> pd.DataFrame | None:
     if not path.exists():
         return None
     return pd.read_csv(path)
+
+
+def _load_tradeoff_summary(results: Path) -> pd.DataFrame | None:
+    candidates = sorted(results.glob("tradeoff_*/tradeoff_summary.csv"))
+    candidates = [path for path in candidates if "smoke" not in str(path).lower()]
+    if not candidates:
+        return None
+    frames = []
+    for path in candidates:
+        frame = pd.read_csv(path)
+        frame["source_table"] = str(path)
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True, sort=False)
 
 
 def _stack(frames: list[pd.DataFrame], column: str) -> tuple[np.ndarray, np.ndarray]:
@@ -244,6 +261,73 @@ def _figure_robustness_heatmap(setting_summary: pd.DataFrame, out: Path) -> Path
     return path
 
 
+def _figure_tradeoff(tradeoff: pd.DataFrame, out: Path) -> Path:
+    df = tradeoff.copy()
+    df["condition_value"] = df["tradeoff_condition"].map(_parse_control_penalty)
+    df = df.sort_values(["condition_value", "seed"])
+    summary = (
+        df.groupby("tradeoff_condition", sort=False)
+        .agg(
+            n=("seed", "count"),
+            support=("claim_C4_tradeoff_quantified", lambda values: _fraction_bool(values)),
+            mean_conditional=("conditional_tradeoff_fraction", "mean"),
+            se_conditional=("conditional_tradeoff_fraction", lambda values: float(pd.to_numeric(values, errors="coerce").std(ddof=1) / np.sqrt(len(values)))),
+            penalty=("condition_value", "first"),
+        )
+        .reset_index()
+        .sort_values("penalty")
+    )
+    labels = [_format_penalty(value) for value in summary["penalty"]]
+    x = np.arange(len(summary))
+    colors = sns.color_palette("deep", len(summary))
+    fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.1), gridspec_kw={"width_ratios": [0.95, 1.35]})
+    axes[0].bar(x, summary["support"], color=colors)
+    for idx, row in summary.iterrows():
+        n = int(row["n"])
+        count = int(round(float(row["support"]) * n))
+        axes[0].text(idx, min(1.09, float(row["support"]) + 0.035), f"{count}/{n}", ha="center", va="bottom", fontsize=8)
+    axes[0].set_xticks(x, labels, rotation=25, ha="right")
+    axes[0].set(ylim=(0, 1.14), xlabel=r"Control penalty $\lambda_u$", ylabel="C4 support fraction")
+
+    for idx, row in summary.reset_index(drop=True).iterrows():
+        condition = row["tradeoff_condition"]
+        values = pd.to_numeric(df[df["tradeoff_condition"] == condition]["conditional_tradeoff_fraction"], errors="coerce").dropna().to_numpy()
+        offsets = np.linspace(-0.13, 0.13, len(values)) if len(values) > 1 else np.array([0.0])
+        axes[1].scatter(np.full(len(values), idx) + offsets, values, color=colors[idx], s=18, alpha=0.5, linewidths=0, zorder=2)
+        axes[1].scatter(idx, np.mean(values), color=colors[idx], s=60, marker="D", edgecolor="white", linewidth=0.8, zorder=4)
+    axes[1].set_xticks(x, labels, rotation=25, ha="right")
+    axes[1].set(
+        xlabel=r"Control penalty $\lambda_u$",
+        ylabel="Conditional tradeoff fraction",
+        ylim=(0, max(0.42, float(np.nanmax(df["conditional_tradeoff_fraction"])) * 1.15)),
+    )
+    sns.despine(fig)
+    fig.tight_layout()
+    path = out / "figure_7_tradeoff_analysis.png"
+    fig.savefig(path, dpi=240, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _parse_control_penalty(value: object) -> float:
+    text = str(value).removeprefix("control_penalty_").replace("p", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return float("nan")
+
+
+def _format_penalty(value: float) -> str:
+    if not np.isfinite(value):
+        return "unknown"
+    return f"{value:g}"
+
+
+def _fraction_bool(values: pd.Series) -> float:
+    normalized = values.astype(str).str.lower().str.strip()
+    return float(normalized.isin({"true", "1", "yes"}).mean())
+
+
 def _figure_coupled_spectra(frames: list[pd.DataFrame], processed: Path, out: Path) -> Path:
     colors = sns.color_palette("deep")
     epochs, coupled = _stack(frames, "closed_coupled_radius")
@@ -279,8 +363,18 @@ def _figure_generalization(setting_summary: pd.DataFrame, processed: Path, out: 
         "low_rank": "low-rank",
         "tracking_task": "tracking",
         "ring_path_integration": "ring",
+        "ring_partial_obs_gru": "partial ring GRU",
+        "ring_partial_obs_tanh": "partial ring tanh",
     }
-    order = ["tanh_rnn", "gru", "low_rank", "tracking_task", "ring_path_integration"]
+    order = [
+        "tanh_rnn",
+        "gru",
+        "low_rank",
+        "tracking_task",
+        "ring_path_integration",
+        "ring_partial_obs_gru",
+        "ring_partial_obs_tanh",
+    ]
     gen["setting"] = pd.Categorical(gen["setting"], categories=order, ordered=True)
     gen = gen.sort_values("setting")
     x = np.arange(len(gen))

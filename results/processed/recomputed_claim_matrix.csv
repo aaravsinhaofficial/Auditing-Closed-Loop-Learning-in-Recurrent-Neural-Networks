@@ -3,5 +3,5 @@ C1,Closed-loop/open-loop divergence,455,0.8285714285714286,0.7934065934065934,0.
 C2,Closed-loop stages,455,0.09230769230769231,0.066978021978022,0.12087912087912088,plateau present plus non-fallback second stage boundary
 C2a,Closed-loop slow-progress phase,455,0.967032967032967,0.9504945054945054,0.9824175824175824,early rapid improvement followed by slow-progress phase
 C3,Coupled-system stability transition,455,0.8219780219780219,0.7846153846153846,0.8527472527472527,finite coupled spectral radius crossing
-C4,Short-term vs long-term tradeoff,455,0.10989010989010989,0.08351648351648351,0.13741758241758237,proxy only: open-loop deployed spike plus closed-loop recovery
+C4,Short-term vs long-term tradeoff,120,1.0,1.0,1.0,targeted short-vs-long horizon tradeoff sweep
 C5,Generalization,90,0.4666666666666667,0.35555555555555557,0.5666666666666667,generalization variants preserving deployed-loss divergence
