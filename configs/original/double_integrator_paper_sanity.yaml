@@ -1,24 +1,29 @@
-experiment_name: smoke_seed_sweep
+experiment_name: original_double_integrator_paper_sanity
 output_dir: results/raw
-seeds: [0, 1]
+protocol:
+  target: paper_main_text
+  notes: "Single-seed signature check: x0 in [-2,2]^2, beta=0, squared Euclidean state cost, and 1/T state-loss averaging; timestep order follows the public artifact."
+seed: 0
 device: cuda
 task:
   name: double_integrator
   dt: 1.0
+  feedback_strength: 1.0
+  observation_noise: 0.0
   init_low: -2.0
   init_high: 2.0
-  feedback_strength: 1.0
 model:
   name: tanh_rnn
-  hidden_size: 12
+  hidden_size: 100
   recurrent_scale: 0.1
   input_scale: 0.1
   output_scale: 0.1
+  leak: 1.0
 training:
-  epochs: 5
-  batch_size: 6
-  eval_batch_size: 6
-  steps: 8
+  epochs: 1001
+  batch_size: 100
+  eval_batch_size: 10
+  steps: 50
   learning_rate: 0.01
   optimizer: SGD
   gradient_clip: 1.0
@@ -29,5 +34,6 @@ training:
   control_loss_reduction: sum
   normalize_loss_by_steps: true
   open_loop_input: white_noise
+  save_eigenvalues: true
 analysis:
-  min_plateau: 2
+  min_plateau: 8

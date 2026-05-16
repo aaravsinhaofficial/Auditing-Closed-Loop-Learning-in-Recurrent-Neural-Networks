@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -11,7 +12,13 @@ import torch
 from torch import nn
 
 from closed_loop_repro.analysis.gains import effective_gain, gain_distance
-from closed_loop_repro.analysis.spectra import coupled_spectral_summary, rnn_spectral_summary
+from closed_loop_repro.analysis.spectra import (
+    coupled_matrix,
+    coupled_spectral_summary,
+    eigvals,
+    rnn_matrix,
+    rnn_spectral_summary,
+)
 from closed_loop_repro.analysis.spectral_stages import detect_spectral_stages
 from closed_loop_repro.analysis.stages import detect_stages
 from closed_loop_repro.config import save_config
@@ -274,6 +281,9 @@ def _snapshot(
         record[f"{mode}_rnn_{key}"] = float(value)
     for key, value in coupled_summary.items():
         record[f"{mode}_coupled_{key}"] = float(value)
+    if bool(cfg.get("save_eigenvalues", False)):
+        record[f"{mode}_rnn_eigvals"] = _eigvals_json(rnn_matrix(controller))
+        record[f"{mode}_coupled_eigvals"] = _eigvals_json(coupled_matrix(task, controller))
     for idx, value in enumerate(gain[: min(8, len(gain))]):
         record[f"{mode}_gain_{idx}"] = float(value)
     if eval_extra_horizons:
@@ -344,6 +354,15 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
         "task": config.get("task", {}).get("name", "double_integrator"),
         "model": config.get("model", {}).get("name", "tanh_rnn"),
         "epochs": len(records),
+        "protocol_target": config.get("protocol", {}).get("target", "unspecified"),
+        "initial_state_range": [
+            config.get("task", {}).get("init_low", "task_default"),
+            config.get("task", {}).get("init_high", "task_default"),
+        ],
+        "loss_timing": config.get("training", {}).get("loss_timing", "after_step"),
+        "normalize_loss_by_steps": bool(config.get("training", {}).get("normalize_loss_by_steps", True)),
+        "open_loop_input": config.get("training", {}).get("open_loop_input", "teacher_rollout"),
+        "control_penalty": float(config.get("training", {}).get("control_penalty", 0.0)),
         "final_closed_test_loss": final_closed,
         "final_open_test_loss": final_open,
         "peak_open_test_loss": _safe_nanmax(open_test),
@@ -396,6 +415,16 @@ def _safe_nanmax(values: np.ndarray) -> float:
     if finite.size == 0:
         return float("nan")
     return float(np.max(finite))
+
+
+def _eigvals_json(matrix: np.ndarray | None) -> str:
+    if matrix is None:
+        return "[]"
+    values = eigvals(matrix)
+    if values.size == 0:
+        return "[]"
+    values = values[np.argsort(-np.abs(values))]
+    return json.dumps([[float(value.real), float(value.imag)] for value in values])
 
 
 def _optimizer(controller: nn.Module, cfg: dict[str, Any]) -> torch.optim.Optimizer:

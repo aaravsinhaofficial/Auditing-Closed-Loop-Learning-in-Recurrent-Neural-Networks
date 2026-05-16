@@ -3,6 +3,7 @@ import pandas as pd
 
 from closed_loop_repro.analysis.gains import effective_gain
 from closed_loop_repro.analysis.make_claim_tables import make_claim_tables
+from closed_loop_repro.analysis.paper_signature_check import run_signature_check
 from closed_loop_repro.analysis.spectra import spectral_radius
 from closed_loop_repro.analysis.spectral_stages import detect_spectral_stages
 from closed_loop_repro.analysis.stage_changepoints import _analyze_one
@@ -137,3 +138,28 @@ def test_claim_tables_use_targeted_tradeoff_summary_for_a1(tmp_path):
     a1 = claim_df.loc[claim_df["claim"] == "A1"].iloc[0]
     assert a1["n"] == 2
     assert a1["support_fraction"] == 0.5
+
+
+def test_paper_signature_check_writes_summary_and_figures(tmp_path):
+    result = tmp_path / "seed_0000"
+    result.mkdir()
+    eigs = "[[0.9, 0.1], [0.9, -0.1], [0.4, 0.0]]"
+    pd.DataFrame(
+        {
+            "epoch": np.arange(6),
+            "closed_test_loss": [10, 5, 4, 4, 2, 1],
+            "open_test_loss": [10, 12, 30, 20, 8, 2],
+            "closed_gain_0": [-0.02] * 6,
+            "closed_coupled_radius": [1.2, 1.1, 0.9, 0.8, 0.7, 0.6],
+            "closed_coupled_has_unstable_complex": [1, 1, 0, 0, 0, 0],
+            "closed_coupled_unstable_complex_abs": [1.2, 1.1, np.nan, np.nan, np.nan, np.nan],
+            "closed_coupled_third_real_abs": [0.1, 0.1, 0.1, 0.13, 0.15, 0.2],
+            "closed_coupled_eigvals": [eigs] * 6,
+        }
+    ).to_csv(result / "timeseries.csv", index=False)
+    (result / "metrics.json").write_text('{"experiment": "toy", "seed": 0}', encoding="utf-8")
+    paths = run_signature_check(result, tmp_path / "out")
+    assert paths["summary_csv"].exists()
+    assert paths["loss_png"].exists()
+    summary = pd.read_csv(paths["summary_csv"]).iloc[0]
+    assert bool(summary["open_peak_signature"])

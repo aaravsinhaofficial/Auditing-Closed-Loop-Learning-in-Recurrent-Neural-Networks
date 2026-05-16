@@ -23,6 +23,22 @@ Configs default to `device: cuda`. On machines without CUDA, the runner falls
 back to CPU and records both `requested_device` and `resolved_device` in each
 `metrics.json`. To force CPU, set `device: cpu` in the relevant config.
 
+## Paper-Protocol Sanity Check
+
+Before launching a large audit, run one seed under both the main-text protocol
+and the public nonlinear-notebook protocol:
+
+```bash
+bash scripts/run_paper_protocol_sanity.sh 2>&1 | tee logs/paper_protocol_sanity.log
+```
+
+The main-text config uses `x0 in [-2,2]^2`, beta `0`, squared Euclidean state
+cost, and `1/T` state-loss averaging. The notebook config keeps the public
+artifact convention: `x0 in [-1,1]^2`, summed rollout loss, beta `0.005`, and
+white-noise teacher-student open-loop training. Both sanity runs save coupled
+eigenvalues and write signature plots/tables under
+`results/processed/paper_signature_sanity/`.
+
 ## Full Audit
 
 ```bash

@@ -1,8 +1,8 @@
-experiment_name: original_double_integrator_full
+experiment_name: original_double_integrator_artifact_full
 output_dir: results/raw
 protocol:
-  target: paper_main_text
-  notes: "x0 in [-2,2]^2, beta=0, squared Euclidean state cost, and 1/T state-loss averaging; timestep order follows the public artifact."
+  target: public_nonlinear_notebook
+  notes: "Notebook-style training: x0 in [-1,1]^2, summed rollout loss, beta=0.005, white-noise teacher-student open-loop training."
 seeds:
   start: 0
   stop: 50
@@ -12,8 +12,8 @@ task:
   dt: 1.0
   feedback_strength: 1.0
   observation_noise: 0.0
-  init_low: -2.0
-  init_high: 2.0
+  init_low: -1.0
+  init_high: 1.0
 model:
   name: tanh_rnn
   hidden_size: 100
@@ -29,12 +29,12 @@ training:
   learning_rate: 0.01
   optimizer: SGD
   gradient_clip: 1.0
-  control_penalty: 0.0
+  control_penalty: 0.005
   zero_initial_action: true
   loss_timing: before_step
-  state_loss_reduction: sum_state_mean_batch
+  state_loss_reduction: mean_elements
   control_loss_reduction: sum
-  normalize_loss_by_steps: true
+  normalize_loss_by_steps: false
   open_loop_input: white_noise
   save_eigenvalues: false
 analysis:
