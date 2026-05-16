@@ -12,6 +12,12 @@ venv/
 build/
 dist/
 *.egg-info/
+logs/
+closed_loop_rnn_audit_anonymous_supplement.tar.gz
+
+# Local AWS result bundles and pulled logs are not part of the anonymous artifact.
+aws_results_before_pull_*/
+closed_loop_targeted_results_with_raw_*/
 
 # Experiment outputs can be regenerated from configs.
 results/*.tar.gz

@@ -118,5 +118,16 @@ Raw per-run outputs are written under `results/raw/`, processed claim tables
 under `results/processed/`, and generated figures under `results/figures/`.
 Large experiment outputs are ignored by Git by default.
 
-The public repository has also been submitted to Software Heritage:
-https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/aaravsinhaofficial/Auditing-Closed-Loop-Learning-in-Recurrent-Neural-Networks
+## Anonymous Supplement Packaging
+
+For double-blind review, build the supplementary archive from tracked files only:
+
+```bash
+bash scripts/build_anonymous_supplement.sh
+```
+
+This creates `closed_loop_rnn_audit_anonymous_supplement.tar.gz` without
+`.git/`, Git remotes, commit history, local AWS logs, virtual environments, or
+machine-specific cache paths. Public repository and Software Heritage archive
+links are intentionally omitted during anonymous review and should be added only
+after de-anonymization or acceptance.
