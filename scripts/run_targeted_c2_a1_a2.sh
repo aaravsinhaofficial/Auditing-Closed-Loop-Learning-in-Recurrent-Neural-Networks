@@ -22,6 +22,7 @@ python -m closed_loop_repro.analysis.recompute_timeseries_metrics --results resu
 
 log_step "claim tables and figures refresh start"
 python -m closed_loop_repro.analysis.make_claim_tables --results results/raw --out results/processed
+python -m closed_loop_repro.analysis.supplemental_audit_tables --results results/raw --processed results/processed
 python -m closed_loop_repro.plotting.make_all_figures --config configs/figures/tmlr.yaml
 
 log_step "targeted C2/A1/A2 run done"

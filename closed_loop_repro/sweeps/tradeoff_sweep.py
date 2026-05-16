@@ -104,11 +104,21 @@ def _summarize_tradeoff(records: list[dict[str, Any]], config: dict[str, Any]) -
     long_worsening = d_long > min_worsening
     radius_worsening = d_radius > 0
     tradeoff_steps = myopic_improvement & (long_worsening | radius_worsening)
+    loss_tradeoff_steps = myopic_improvement & long_worsening
+    radius_tradeoff_steps = myopic_improvement & radius_worsening
+    both_tradeoff_steps = myopic_improvement & long_worsening & radius_worsening
+    loss_only_tradeoff_steps = myopic_improvement & long_worsening & ~radius_worsening
+    radius_only_tradeoff_steps = myopic_improvement & radius_worsening & ~long_worsening
 
     improvement_count = int(np.sum(myopic_improvement))
     tradeoff_count = int(np.sum(tradeoff_steps))
     tradeoff_fraction = _safe_fraction(tradeoff_steps)
     conditional_tradeoff_fraction = float(tradeoff_count / improvement_count) if improvement_count else 0.0
+    loss_count = int(np.sum(loss_tradeoff_steps))
+    radius_count = int(np.sum(radius_tradeoff_steps))
+    both_count = int(np.sum(both_tradeoff_steps))
+    loss_only_count = int(np.sum(loss_only_tradeoff_steps))
+    radius_only_count = int(np.sum(radius_only_tradeoff_steps))
     return {
         "tradeoff_evaluable": True,
         "short_horizon": int(short),
@@ -124,9 +134,22 @@ def _summarize_tradeoff(records: list[dict[str, Any]], config: dict[str, Any]) -
         "myopic_improvement_step_count": improvement_count,
         "tradeoff_fraction": tradeoff_fraction,
         "conditional_tradeoff_fraction": conditional_tradeoff_fraction,
+        "loss_tradeoff_step_count": loss_count,
+        "radius_tradeoff_step_count": radius_count,
+        "both_tradeoff_step_count": both_count,
+        "loss_only_tradeoff_step_count": loss_only_count,
+        "radius_only_tradeoff_step_count": radius_only_count,
+        "conditional_loss_tradeoff_fraction": float(loss_count / improvement_count) if improvement_count else 0.0,
+        "conditional_radius_tradeoff_fraction": float(radius_count / improvement_count) if improvement_count else 0.0,
+        "conditional_both_tradeoff_fraction": float(both_count / improvement_count) if improvement_count else 0.0,
+        "conditional_loss_only_tradeoff_fraction": float(loss_only_count / improvement_count) if improvement_count else 0.0,
+        "conditional_radius_only_tradeoff_fraction": float(radius_only_count / improvement_count) if improvement_count else 0.0,
         "short_long_delta_corr": _corr(-d_short, d_long),
         "short_radius_delta_corr": _corr(-d_short, d_radius),
         "claim_C4_tradeoff_quantified": bool(conditional_tradeoff_fraction >= 0.1 and tradeoff_count >= 3),
+        "claim_A1_loss_tradeoff": bool(improvement_count and loss_count >= 3 and loss_count / improvement_count >= 0.1),
+        "claim_A1_radius_tradeoff": bool(improvement_count and radius_count >= 3 and radius_count / improvement_count >= 0.1),
+        "claim_A1_both_tradeoff": bool(improvement_count and both_count >= 3 and both_count / improvement_count >= 0.1),
     }
 
 

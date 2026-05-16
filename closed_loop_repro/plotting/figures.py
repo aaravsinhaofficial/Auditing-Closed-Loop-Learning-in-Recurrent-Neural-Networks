@@ -23,7 +23,7 @@ def make_figures(results: str | Path = "results/raw", processed: str | Path = "r
         paths.append(_figure_stage_analysis(original, processed, out))
         paths.append(_figure_coupled_spectra(original, processed, out))
 
-    tradeoff = _load_tradeoff_summary(results)
+    tradeoff = _load_tradeoff_summary(results, processed)
     if tradeoff is not None and not tradeoff.empty:
         paths.append(_figure_tradeoff(tradeoff, out))
 
@@ -72,7 +72,14 @@ def _read_csv(path: Path) -> pd.DataFrame | None:
     return pd.read_csv(path)
 
 
-def _load_tradeoff_summary(results: Path) -> pd.DataFrame | None:
+def _load_tradeoff_summary(results: Path, processed: Path) -> pd.DataFrame | None:
+    recomputed = _read_csv(processed / "recomputed_timeseries_metrics.csv")
+    if recomputed is not None and "kind" in recomputed:
+        tradeoff = recomputed[recomputed["kind"] == "tradeoff"].copy()
+        if not tradeoff.empty:
+            if "tradeoff_condition" not in tradeoff:
+                tradeoff["tradeoff_condition"] = tradeoff["setting"]
+            return tradeoff
     candidates = sorted(results.glob("tradeoff_*/tradeoff_summary.csv"))
     candidates = [path for path in candidates if "smoke" not in str(path).lower()]
     if not candidates:
@@ -259,6 +266,12 @@ def _figure_robustness_heatmap(setting_summary: pd.DataFrame, out: Path) -> Path
         "A1 proxy": "c4_proxy_support",
     }
     heat = rob.set_index("setting")[[*columns.values()]].rename(columns={v: k for k, v in columns.items()})
+    counts = rob.set_index("setting")["n"].reindex(heat.index).fillna(0).astype(int)
+    labels = heat.copy().astype(object)
+    for row_name in heat.index:
+        n = int(counts.loc[row_name])
+        for col_name in heat.columns:
+            labels.loc[row_name, col_name] = f"{int(round(float(heat.loc[row_name, col_name]) * n))}/{n}"
     failure_rows = heat.index.astype(str) == "no_clip"
     mask = np.tile(failure_rows[:, None], (1, heat.shape[1]))
     fig, ax = plt.subplots(figsize=(7.4, 4.2))
@@ -268,8 +281,8 @@ def _figure_robustness_heatmap(setting_summary: pd.DataFrame, out: Path) -> Path
         vmin=0,
         vmax=1,
         cmap="viridis",
-        annot=True,
-        fmt=".2g",
+        annot=labels,
+        fmt="",
         mask=mask,
         cbar_kws={"label": "Support fraction"},
     )
@@ -291,41 +304,52 @@ def _figure_tradeoff(tradeoff: pd.DataFrame, out: Path) -> Path:
     df = tradeoff.copy()
     df["condition_value"] = df["tradeoff_condition"].map(_parse_control_penalty)
     df = df.sort_values(["condition_value", "seed"])
-    summary = (
-        df.groupby("tradeoff_condition", sort=False)
-        .agg(
-            n=("seed", "count"),
-            support=("claim_C4_tradeoff_quantified", lambda values: _fraction_bool(values)),
-            mean_conditional=("conditional_tradeoff_fraction", "mean"),
-            se_conditional=("conditional_tradeoff_fraction", lambda values: float(pd.to_numeric(values, errors="coerce").std(ddof=1) / np.sqrt(len(values)))),
-            penalty=("condition_value", "first"),
+    component_specs = [
+        ("Union", "claim_C4_tradeoff_quantified", "conditional_tradeoff_fraction", "tradeoff_step_count"),
+        ("Loss", "claim_A1_loss_tradeoff", "conditional_loss_tradeoff_fraction", "loss_tradeoff_step_count"),
+        ("Radius", "claim_A1_radius_tradeoff", "conditional_radius_tradeoff_fraction", "radius_tradeoff_step_count"),
+        ("Both", "claim_A1_both_tradeoff", "conditional_both_tradeoff_fraction", "both_tradeoff_step_count"),
+    ]
+    rows = []
+    for label, support_col, fraction_col, count_col in component_specs:
+        fractions = pd.to_numeric(df.get(fraction_col, pd.Series(dtype=float)), errors="coerce")
+        counts = pd.to_numeric(df.get(count_col, pd.Series(dtype=float)), errors="coerce")
+        if support_col in df:
+            support = _bool_series(df[support_col])
+        else:
+            support = (fractions >= 0.1) & (counts >= 3)
+        rows.append(
+            {
+                "label": label,
+                "support": float(support.fillna(False).mean()),
+                "support_count": int(support.fillna(False).sum()),
+                "n": int(len(df)),
+                "fractions": fractions.dropna().to_numpy(dtype=float),
+            }
         )
-        .reset_index()
-        .sort_values("penalty")
-    )
-    labels = [_format_penalty(value) for value in summary["penalty"]]
-    x = np.arange(len(summary))
-    colors = sns.color_palette("deep", len(summary))
+    labels = [row["label"] for row in rows]
+    x = np.arange(len(rows))
+    colors = sns.color_palette("deep", len(rows))
     fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.1), gridspec_kw={"width_ratios": [0.95, 1.35]})
     _panel_label(axes[0], "(a)")
     _panel_label(axes[1], "(b)")
-    axes[0].bar(x, summary["support"], color=colors)
-    for idx, row in summary.iterrows():
+    axes[0].bar(x, [row["support"] for row in rows], color=colors)
+    for idx, row in enumerate(rows):
         n = int(row["n"])
-        count = int(round(float(row["support"]) * n))
+        count = int(row["support_count"])
         axes[0].text(idx, min(1.09, float(row["support"]) + 0.035), f"{count}/{n}", ha="center", va="bottom", fontsize=8)
-    axes[0].set_xticks(x, labels, rotation=25, ha="right")
-    axes[0].set(ylim=(0, 1.14), xlabel=r"Control penalty $\lambda_u$", ylabel="A1 support fraction")
+    axes[0].set_xticks(x, labels, rotation=20, ha="right")
+    axes[0].set(ylim=(0, 1.14), xlabel="A1 component criterion", ylabel="Support fraction")
 
-    for idx, row in summary.reset_index(drop=True).iterrows():
-        condition = row["tradeoff_condition"]
-        values = pd.to_numeric(df[df["tradeoff_condition"] == condition]["conditional_tradeoff_fraction"], errors="coerce").dropna().to_numpy()
+    for idx, row in enumerate(rows):
+        values = row["fractions"]
         offsets = np.linspace(-0.13, 0.13, len(values)) if len(values) > 1 else np.array([0.0])
         axes[1].scatter(np.full(len(values), idx) + offsets, values, color=colors[idx], s=18, alpha=0.5, linewidths=0, zorder=2)
-        axes[1].scatter(idx, np.mean(values), color=colors[idx], s=60, marker="D", edgecolor="white", linewidth=0.8, zorder=4)
-    axes[1].set_xticks(x, labels, rotation=25, ha="right")
+        if len(values):
+            axes[1].scatter(idx, np.mean(values), color=colors[idx], s=60, marker="D", edgecolor="white", linewidth=0.8, zorder=4)
+    axes[1].set_xticks(x, labels, rotation=20, ha="right")
     axes[1].set(
-        xlabel=r"Control penalty $\lambda_u$",
+        xlabel="A1 component criterion",
         ylabel="Conditional tradeoff fraction",
         ylim=(0, max(0.42, float(np.nanmax(df["conditional_tradeoff_fraction"])) * 1.15)),
     )
@@ -352,8 +376,16 @@ def _format_penalty(value: float) -> str:
 
 
 def _fraction_bool(values: pd.Series) -> float:
+    return float(_bool_series(values).mean())
+
+
+def _bool_series(values: pd.Series) -> pd.Series:
+    if values.dtype == bool:
+        return values
+    if pd.api.types.is_numeric_dtype(values):
+        return values.fillna(0).astype(bool)
     normalized = values.astype(str).str.lower().str.strip()
-    return float(normalized.isin({"true", "1", "yes"}).mean())
+    return normalized.isin({"true", "1", "yes"})
 
 
 def _figure_coupled_spectra(frames: list[pd.DataFrame], processed: Path, out: Path) -> Path:

@@ -1,0 +1,6 @@
+component,kind,paired_runs,config,produces
+Core C1-C3 reproduction,original,50,configs/original/double_integrator_full.yaml,Figure 2; C1-C3 original-setting tests
+Robustness sweep,robustness,195,configs/robustness/maximal.yaml,Figure 4; perturbation summary
+Targeted A1 tradeoff,tradeoff,120,configs/tradeoff/control_penalty_horizon.yaml,Figure 7; A1 component table
+A2 generalization,generalization,90,configs/generalization/maximal.yaml; configs/generalization/path_integration_hard.yaml,Figure 6; variant summary
+Total completed paired runs,all,455,all above,All claim and audit tables

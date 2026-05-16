@@ -175,9 +175,21 @@ def _recompute_tradeoff_metrics(df: pd.DataFrame, config: dict[str, Any]) -> dic
     min_improvement = float(config.get("analysis", {}).get("tradeoff_min_log_improvement", 0.005))
     min_worsening = float(config.get("analysis", {}).get("tradeoff_min_log_worsening", 0.005))
     myopic_improvement = d_short < -min_improvement
+    long_worsening = d_long > min_worsening
+    radius_worsening = d_radius > 0
+    loss_tradeoff_steps = myopic_improvement & long_worsening
+    radius_tradeoff_steps = myopic_improvement & radius_worsening
+    both_tradeoff_steps = myopic_improvement & long_worsening & radius_worsening
+    loss_only_tradeoff_steps = myopic_improvement & long_worsening & ~radius_worsening
+    radius_only_tradeoff_steps = myopic_improvement & radius_worsening & ~long_worsening
     tradeoff_steps = myopic_improvement & ((d_long > min_worsening) | (d_radius > 0))
     improvement_count = int(np.sum(myopic_improvement))
     tradeoff_count = int(np.sum(tradeoff_steps))
+    loss_count = int(np.sum(loss_tradeoff_steps))
+    radius_count = int(np.sum(radius_tradeoff_steps))
+    both_count = int(np.sum(both_tradeoff_steps))
+    loss_only_count = int(np.sum(loss_only_tradeoff_steps))
+    radius_only_count = int(np.sum(radius_only_tradeoff_steps))
     conditional = float(tradeoff_count / improvement_count) if improvement_count else 0.0
     return {
         "tradeoff_evaluable": True,
@@ -187,7 +199,20 @@ def _recompute_tradeoff_metrics(df: pd.DataFrame, config: dict[str, Any]) -> dic
         "myopic_improvement_step_count": improvement_count,
         "tradeoff_fraction": float(np.mean(tradeoff_steps)) if tradeoff_steps.size else float("nan"),
         "conditional_tradeoff_fraction": conditional,
+        "loss_tradeoff_step_count": loss_count,
+        "radius_tradeoff_step_count": radius_count,
+        "both_tradeoff_step_count": both_count,
+        "loss_only_tradeoff_step_count": loss_only_count,
+        "radius_only_tradeoff_step_count": radius_only_count,
+        "conditional_loss_tradeoff_fraction": float(loss_count / improvement_count) if improvement_count else 0.0,
+        "conditional_radius_tradeoff_fraction": float(radius_count / improvement_count) if improvement_count else 0.0,
+        "conditional_both_tradeoff_fraction": float(both_count / improvement_count) if improvement_count else 0.0,
+        "conditional_loss_only_tradeoff_fraction": float(loss_only_count / improvement_count) if improvement_count else 0.0,
+        "conditional_radius_only_tradeoff_fraction": float(radius_only_count / improvement_count) if improvement_count else 0.0,
         "claim_C4_tradeoff_quantified": bool(conditional >= 0.1 and tradeoff_count >= 3),
+        "claim_A1_loss_tradeoff": bool(improvement_count and loss_count >= 3 and loss_count / improvement_count >= 0.1),
+        "claim_A1_radius_tradeoff": bool(improvement_count and radius_count >= 3 and radius_count / improvement_count >= 0.1),
+        "claim_A1_both_tradeoff": bool(improvement_count and both_count >= 3 and both_count / improvement_count >= 0.1),
     }
 
 
@@ -242,7 +267,7 @@ def _claim_matrix(df: pd.DataFrame) -> pd.DataFrame:
                 "Protocol robustness and short/long horizon tradeoff",
                 c4_df,
                 "claim_C4_tradeoff_quantified",
-                "targeted short-vs-long horizon tradeoff sweep",
+                "targeted union loss-or-radius tradeoff sweep; see component summary",
             )
         )
     else:

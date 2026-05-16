@@ -63,7 +63,7 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
     rows.append(_claim_row("C3", df, "claim_C3_stability_transition", "finite coupled spectral radius crossing"))
     if "claim_C4_tradeoff_quantified" in df and df["claim_C4_tradeoff_quantified"].notna().any():
         c4_df = df[df["claim_C4_tradeoff_quantified"].notna()]
-        rows.append(_claim_row("A1", c4_df, "claim_C4_tradeoff_quantified", "targeted short-vs-long horizon tradeoff sweep"))
+        rows.append(_claim_row("A1", c4_df, "claim_C4_tradeoff_quantified", "targeted union loss-or-radius tradeoff sweep; see component summary"))
     else:
         rows.append(_claim_row("A1", df, "claim_C4_tradeoff", "proxy only: open-loop deployed-loss spike plus closed-loop recovery"))
     if "variant" in df.columns:

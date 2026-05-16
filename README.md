@@ -35,7 +35,9 @@ Equivalent individual commands:
 python -m closed_loop_repro.sweeps.seed_sweep --config configs/original/double_integrator_full.yaml
 python -m closed_loop_repro.sweeps.robustness_sweep --config configs/robustness/maximal.yaml
 python -m closed_loop_repro.sweeps.generalization_sweep --config configs/generalization/maximal.yaml
+python -m closed_loop_repro.analysis.recompute_timeseries_metrics --results results/raw --out results/processed
 python -m closed_loop_repro.analysis.make_claim_tables --results results/raw --out results/processed
+python -m closed_loop_repro.analysis.supplemental_audit_tables --results results/raw --processed results/processed
 python -m closed_loop_repro.plotting.make_all_figures --config configs/figures/tmlr.yaml
 ```
 
@@ -79,6 +81,11 @@ python -m closed_loop_repro.analysis.stage_changepoints \
 python -m closed_loop_repro.analysis.recompute_timeseries_metrics \
   --results results/raw \
   --out results/processed
+
+# Build run accounting, original-vs-reproduction, A1 component, and C2 sensitivity tables.
+python -m closed_loop_repro.analysis.supplemental_audit_tables \
+  --results results/raw \
+  --processed results/processed
 ```
 
 The A1 sweep writes `results/raw/tradeoff_control_penalty_horizon/tradeoff_summary.csv`.
@@ -110,3 +117,6 @@ The package separates original reproduction claims from audit questions:
 Raw per-run outputs are written under `results/raw/`, processed claim tables
 under `results/processed/`, and generated figures under `results/figures/`.
 Large experiment outputs are ignored by Git by default.
+
+The public repository has also been submitted to Software Heritage:
+https://archive.softwareheritage.org/browse/origin/?origin_url=https://github.com/aaravsinhaofficial/Auditing-Closed-Loop-Learning-in-Recurrent-Neural-Networks

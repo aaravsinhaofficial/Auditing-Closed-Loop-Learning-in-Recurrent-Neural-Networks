@@ -3,5 +3,5 @@
 | C1 | Closed-loop/open-loop divergence | 455 | 0.8285714285714286 | 0.7912087912087912 | 0.8593406593406593 | deployed closed-loop loss gap >5%; gain divergence reported in diagnostics |
 | C2 | Closed-loop stages | 455 | 0.04835164835164835 | 0.03076923076923077 | 0.06813186813186813 | finite runs with algorithmic plateau and non-fallback exit detection |
 | C3 | Coupled-system stability transition | 455 | 0.8219780219780219 | 0.7834615384615384 | 0.8549450549450549 | finite coupled spectral radius crossing |
-| A1 | Protocol robustness and short/long horizon tradeoff | 120 | 1.0 | 1.0 | 1.0 | targeted short-vs-long horizon tradeoff sweep |
+| A1 | Protocol robustness and short/long horizon tradeoff | 120 | 1.0 | 1.0 | 1.0 | targeted union loss-or-radius tradeoff sweep; see component summary |
 | A2 | Broader generalization | 90 | 0.4666666666666667 | 0.36666666666666664 | 0.5666666666666667 | generalization variants preserving deployed-loss divergence |
