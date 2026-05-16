@@ -11,8 +11,8 @@ model:
   name: tanh_rnn
   hidden_size: 16
   recurrent_scale: 0.1
-  input_scale: 1.0
-  output_scale: 1.0
+  input_scale: 0.1
+  output_scale: 0.1
   leak: 1.0
 training:
   epochs: 8
@@ -23,5 +23,11 @@ training:
   optimizer: SGD
   gradient_clip: 1.0
   control_penalty: 0.005
+  zero_initial_action: true
+  loss_timing: before_step
+  state_loss_reduction: mean_elements
+  control_loss_reduction: sum
+  normalize_loss_by_steps: false
+  open_loop_input: white_noise
 analysis:
   min_plateau: 3

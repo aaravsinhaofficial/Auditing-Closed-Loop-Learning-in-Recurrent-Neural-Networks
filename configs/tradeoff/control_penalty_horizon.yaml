@@ -16,13 +16,13 @@ base:
     name: tanh_rnn
     hidden_size: 100
     recurrent_scale: 0.1
-    input_scale: 1.0
-    output_scale: 1.0
+    input_scale: 0.1
+    output_scale: 0.1
     leak: 1.0
   training:
-    epochs: 1000
+    epochs: 1001
     batch_size: 100
-    eval_batch_size: 32
+    eval_batch_size: 10
     steps: 50
     evaluation_horizons: [10, 50, 200]
     horizon_eval_interval: 5
@@ -30,6 +30,12 @@ base:
     optimizer: SGD
     gradient_clip: 1.0
     control_penalty: 0.005
+    zero_initial_action: true
+    loss_timing: before_step
+    state_loss_reduction: mean_elements
+    control_loss_reduction: sum
+    normalize_loss_by_steps: false
+    open_loop_input: white_noise
   analysis:
     min_plateau: 8
     tradeoff_min_log_improvement: 0.005

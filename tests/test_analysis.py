@@ -4,6 +4,7 @@ import pandas as pd
 from closed_loop_repro.analysis.gains import effective_gain
 from closed_loop_repro.analysis.make_claim_tables import make_claim_tables
 from closed_loop_repro.analysis.spectra import spectral_radius
+from closed_loop_repro.analysis.spectral_stages import detect_spectral_stages
 from closed_loop_repro.analysis.stage_changepoints import _analyze_one
 from closed_loop_repro.analysis.stages import detect_stages
 from closed_loop_repro.analysis.statistics import bootstrap_ci
@@ -45,6 +46,25 @@ def test_stage_detection_allows_plateau_when_stability_crosses_at_start():
     assert result.plateau_end - result.stage1_end >= 5
     assert result.plateau_exit_reason == "fallback"
     assert not result.plateau_exit_detected
+
+
+def test_spectral_stage_detector_uses_ger_barak_signatures():
+    frame = pd.DataFrame(
+        {
+            "epoch": np.arange(12),
+            "closed_gain_0": [-0.02] * 12,
+            "closed_coupled_radius": [1.3, 1.2, 1.1, 1.05, 0.95, 0.9, 0.88, 0.86, 0.84, 0.82, 0.8, 0.79],
+            "closed_coupled_has_unstable_complex": [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            "closed_coupled_third_real_abs": [0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.18, 0.21, 0.25, 0.27, 0.29, 0.3],
+        }
+    )
+    result = detect_spectral_stages(frame, persistence=2)
+    assert result.stage1_supported
+    assert result.stage2_supported
+    assert result.stage3_supported
+    assert result.three_stage_supported
+    assert result.stage1_end == 0
+    assert result.stage2_end == 4
 
 
 def test_bootstrap_ci_smoke():

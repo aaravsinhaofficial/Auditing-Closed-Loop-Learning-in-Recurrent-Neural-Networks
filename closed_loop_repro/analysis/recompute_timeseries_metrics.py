@@ -9,6 +9,7 @@ import pandas as pd
 import yaml
 
 from closed_loop_repro.analysis.gains import gain_distance
+from closed_loop_repro.analysis.spectral_stages import detect_spectral_stages
 from closed_loop_repro.analysis.stages import detect_stages
 from closed_loop_repro.analysis.statistics import bootstrap_ci
 from closed_loop_repro.io import ensure_dir
@@ -59,6 +60,7 @@ def _recompute_one(path: Path) -> dict[str, Any] | None:
     open_test = df["open_test_loss"].to_numpy(dtype=float)
     closed_radius = df.get("closed_coupled_radius", pd.Series(np.nan, index=df.index)).to_numpy(dtype=float)
     stages = detect_stages(closed_test, closed_radius, min_plateau=min_plateau)
+    spectral_stages = detect_spectral_stages(df)
 
     final_closed = float(closed_test[-1])
     final_open = float(open_test[-1])
@@ -70,6 +72,11 @@ def _recompute_one(path: Path) -> dict[str, Any] | None:
     initial_open = float(open_test[0]) if np.isfinite(open_test[0]) else 1e-12
 
     open_spike = bool(np.isfinite(open_peak) and open_peak > 2.0 * max(initial_open, final_open, 1e-12))
+    open_post_initial_peak = bool(
+        np.isfinite(open_peak)
+        and int(np.nanargmax(open_test)) > 0
+        and open_peak > 1.5 * max(initial_open, 1e-12)
+    )
     recovered = bool(finite_final_losses and np.isfinite(closed_test[0]) and final_closed < closed_test[0])
     final_radius = float(closed_radius[-1])
 
@@ -88,6 +95,10 @@ def _recompute_one(path: Path) -> dict[str, Any] | None:
         "peak_closed_test_loss": _safe_nanmax(closed_test),
         "trajectory_gain_distance": final_gain_distance,
         "open_loop_test_loss_spike": open_spike,
+        "open_loop_post_initial_peak": open_post_initial_peak,
+        "open_loop_peak_epoch": int(np.nanargmax(open_test)) if np.any(np.isfinite(open_test)) else np.nan,
+        "open_loop_peak_ratio_to_initial": float(open_peak / max(initial_open, 1e-12)) if np.isfinite(open_peak) else float("nan"),
+        "open_loop_peak_ratio_to_final": float(open_peak / max(final_open, 1e-12)) if np.isfinite(open_peak) and np.isfinite(final_open) else float("nan"),
         "closed_recovered": recovered,
         "stage1_end": int(stages.stage1_end),
         "plateau_end": int(stages.plateau_end),
@@ -105,7 +116,9 @@ def _recompute_one(path: Path) -> dict[str, Any] | None:
     row["claim_C1_gain_divergence"] = bool(np.isfinite(final_gain_distance) and final_gain_distance > 0.05)
     row["claim_C2_plateau_present"] = bool(finite_final_losses and stages.plateau_detected)
     row["claim_C2_three_stage"] = bool(finite_final_losses and stages.plateau_detected and stages.plateau_exit_detected)
+    row["claim_C2_spectral_three_stage"] = bool(finite_final_losses and spectral_stages.three_stage_supported)
     row["claim_C3_stability_transition"] = bool(np.isfinite(final_radius) and stages.stability_crossing is not None)
+    row.update(spectral_stages.as_dict())
     row["claim_C4_proxy"] = bool(finite_final_losses and open_spike and recovered)
     row.update(_recompute_tradeoff_metrics(df, config))
     return row
@@ -230,8 +243,15 @@ def _stage_columns(df: pd.DataFrame) -> pd.DataFrame:
         "plateau_exit_reason",
         "stability_crossing",
         "stability_to_plateau_gap",
+        "spectral_stage1_end",
+        "spectral_stage2_end",
+        "spectral_lambda3_growth",
+        "claim_C2_spectral_stage1",
+        "claim_C2_spectral_stage2",
+        "claim_C2_spectral_stage3",
+        "claim_C2_spectral_three_stage",
     ]
-    return df[columns].copy()
+    return df[[column for column in columns if column in df]].copy()
 
 
 def _claim_matrix(df: pd.DataFrame) -> pd.DataFrame:
@@ -250,6 +270,13 @@ def _claim_matrix(df: pd.DataFrame) -> pd.DataFrame:
             df,
             "claim_C2_plateau_present",
             "early rapid improvement followed by slow-progress phase",
+        ),
+        _claim_row(
+            "C2s",
+            "Closed-loop spectral stages",
+            df,
+            "claim_C2_spectral_three_stage",
+            "negative-position unstable complex mode, stability crossing, and lambda3 growth",
         ),
         _claim_row(
             "C3",
@@ -317,6 +344,7 @@ def _setting_summary(df: pd.DataFrame) -> pd.DataFrame:
                 "n": int(len(group)),
                 "c1_loss_support": float(group["claim_C1_loss_divergence"].mean()),
                 "c2_three_stage_support": float(group["claim_C2_three_stage"].mean()),
+                "c2_spectral_three_stage_support": float(pd.to_numeric(group.get("claim_C2_spectral_three_stage", pd.Series(np.nan, index=group.index)), errors="coerce").mean()),
                 "c2_plateau_support": float(group["claim_C2_plateau_present"].mean()),
                 "c3_stability_support": float(group["claim_C3_stability_transition"].mean()),
                 "c4_proxy_support": float(group["claim_C4_proxy"].mean()),

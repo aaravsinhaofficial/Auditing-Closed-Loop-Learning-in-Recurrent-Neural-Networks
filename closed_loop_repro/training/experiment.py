@@ -11,7 +11,8 @@ import torch
 from torch import nn
 
 from closed_loop_repro.analysis.gains import effective_gain, gain_distance
-from closed_loop_repro.analysis.spectra import coupled_spectral_radius, rnn_spectral_radius
+from closed_loop_repro.analysis.spectra import coupled_spectral_summary, rnn_spectral_summary
+from closed_loop_repro.analysis.spectral_stages import detect_spectral_stages
 from closed_loop_repro.analysis.stages import detect_stages
 from closed_loop_repro.config import save_config
 from closed_loop_repro.io import ensure_dir, write_json
@@ -168,10 +169,19 @@ def _closed_loop_loss(controller: nn.Module, task, cfg: dict[str, Any], rng: np.
     total = torch.zeros((), dtype=torch.float32, device=device)
     for step in range(steps):
         obs = task.observe(state, step)
-        action, hidden = controller(obs, hidden)
-        state = task.step(state, action, step)
-        total = total + task.state_cost(state, step).mean() + control_penalty * torch.mean(action**2)
-    return total / steps
+        if step == 0 and bool(cfg.get("zero_initial_action", False)):
+            action = torch.zeros((batch_size, task.action_dim), dtype=state.dtype, device=device)
+        else:
+            action, hidden = controller(obs, hidden)
+        if cfg.get("loss_timing", "after_step") == "before_step":
+            total = total + _state_loss(task, state, step, cfg) + control_penalty * _control_loss(action, cfg)
+            state = task.step(state, action, step)
+        else:
+            state = task.step(state, action, step)
+            total = total + _state_loss(task, state, step, cfg) + control_penalty * _control_loss(action, cfg)
+    if bool(cfg.get("normalize_loss_by_steps", True)):
+        return total / steps
+    return total
 
 
 def _teacher_forcing_loss(student: nn.Module, teacher: nn.Module, task, cfg: dict[str, Any], rng: np.random.Generator, device: torch.device) -> torch.Tensor:
@@ -181,6 +191,17 @@ def _teacher_forcing_loss(student: nn.Module, teacher: nn.Module, task, cfg: dic
     h_student = student.initial_hidden(batch_size, device)
     h_teacher = teacher.initial_hidden(batch_size, device)
     total = torch.zeros((), dtype=torch.float32, device=device)
+    if cfg.get("open_loop_input", "teacher_rollout") == "white_noise":
+        noise = torch.randn((steps, batch_size, task.obs_dim), dtype=torch.float32, device=device)
+        for step in range(steps):
+            obs = noise[step]
+            with torch.no_grad():
+                teacher_action, h_teacher = teacher(obs, h_teacher)
+            student_action, h_student = student(obs, h_student)
+            total = total + torch.mean((student_action - teacher_action) ** 2)
+        if bool(cfg.get("normalize_loss_by_steps", True)):
+            return total / steps
+        return total
     for step in range(steps):
         obs = task.observe(state, step)
         with torch.no_grad():
@@ -189,7 +210,9 @@ def _teacher_forcing_loss(student: nn.Module, teacher: nn.Module, task, cfg: dic
         total = total + torch.mean((student_action - teacher_action) ** 2)
         with torch.no_grad():
             state = task.step(state, teacher_action, step)
-    return total / steps
+    if bool(cfg.get("normalize_loss_by_steps", True)):
+        return total / steps
+    return total
 
 
 @torch.no_grad()
@@ -203,11 +226,18 @@ def _evaluate(controller: nn.Module, task, cfg: dict[str, Any], device: torch.de
     states, controls, losses = [], [], []
     for step in range(steps):
         obs = task.observe(state, step)
-        action, hidden = controller(obs, hidden)
+        if step == 0 and bool(cfg.get("eval_zero_initial_action", cfg.get("zero_initial_action", False))):
+            action = torch.zeros((batch_size, task.action_dim), dtype=state.dtype, device=device)
+        else:
+            action, hidden = controller(obs, hidden)
         states.append(state.detach().cpu().numpy())
         controls.append(action.detach().cpu().numpy())
-        state = task.step(state, action, step)
-        losses.append(float(task.state_cost(state, step).mean().detach().cpu()))
+        if cfg.get("eval_loss_timing", cfg.get("loss_timing", "after_step")) == "before_step":
+            losses.append(float(_state_loss(task, state, step, cfg).detach().cpu()))
+            state = task.step(state, action, step)
+        else:
+            state = task.step(state, action, step)
+            losses.append(float(_state_loss(task, state, step, cfg).detach().cpu()))
     states_np = np.stack(states)
     controls_np = np.stack(controls)
     gain = effective_gain(states_np[..., : min(states_np.shape[-1], max(1, controls_np.shape[-1] + 1))], controls_np)
@@ -230,14 +260,20 @@ def _snapshot(
 ) -> dict[str, float]:
     eval_out = _evaluate(controller, task, cfg, device)
     gain = eval_out["gain"].reshape(-1)
+    rnn_summary = rnn_spectral_summary(controller)
+    coupled_summary = coupled_spectral_summary(task, controller)
     record = {
         "epoch": epoch,
         f"{mode}_train_loss": train_loss,
         f"{mode}_test_loss": eval_out["test_loss"],
         f"{mode}_peak_loss": eval_out["peak_loss"],
-        f"{mode}_rnn_radius": rnn_spectral_radius(controller),
-        f"{mode}_coupled_radius": coupled_spectral_radius(task, controller),
+        f"{mode}_rnn_radius": rnn_summary["radius"],
+        f"{mode}_coupled_radius": coupled_summary["radius"],
     }
+    for key, value in rnn_summary.items():
+        record[f"{mode}_rnn_{key}"] = float(value)
+    for key, value in coupled_summary.items():
+        record[f"{mode}_coupled_{key}"] = float(value)
     for idx, value in enumerate(gain[: min(8, len(gain))]):
         record[f"{mode}_gain_{idx}"] = float(value)
     if eval_extra_horizons:
@@ -277,6 +313,7 @@ def _merge_histories(closed: list[dict[str, float]], open_loop: list[dict[str, f
 
 
 def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config: dict[str, Any]) -> dict[str, Any]:
+    spectral_stages = detect_spectral_stages(pd.DataFrame(records))
     closed_test = np.asarray([r["closed_test_loss"] for r in records], dtype=float)
     open_test = np.asarray([r["open_test_loss"] for r in records], dtype=float)
     closed_radius = np.asarray([r["closed_coupled_radius"] for r in records], dtype=float)
@@ -292,11 +329,16 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
     c1_loss_divergence = bool(finite_final_losses and relative_loss_gap > 0.05)
     c1_gain_divergence = bool(np.isfinite(final_gain_distance) and final_gain_distance > 0.05)
     open_spike = bool(np.any(np.isfinite(open_test)) and np.nanmax(open_test) > 2.0 * max(initial_open, final_open, 1e-12))
+    open_post_initial_peak = bool(
+        np.any(np.isfinite(open_test))
+        and int(np.nanargmax(open_test)) > 0
+        and np.nanmax(open_test) > 1.5 * max(initial_open, 1e-12)
+    )
     stability_crossing = stages.stability_crossing
     plateau_exit = stages.plateau_end
     timing_gap = None if stability_crossing is None else int(plateau_exit - stability_crossing)
     recovered = bool(finite_final_losses and np.isfinite(closed_test[0]) and final_closed < closed_test[0])
-    return {
+    metrics = {
         "experiment": config.get("experiment_name", "unnamed"),
         "seed": seed,
         "task": config.get("task", {}).get("name", "double_integrator"),
@@ -310,6 +352,10 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
         "deployed_loss_gap_relative_to_closed": float(relative_loss_gap),
         "trajectory_gain_distance": final_gain_distance,
         "open_loop_test_loss_spike": open_spike,
+        "open_loop_post_initial_peak": open_post_initial_peak,
+        "open_loop_peak_epoch": int(np.nanargmax(open_test)) if np.any(np.isfinite(open_test)) else None,
+        "open_loop_peak_ratio_to_initial": float(_safe_nanmax(open_test) / max(initial_open, 1e-12)),
+        "open_loop_peak_ratio_to_final": float(_safe_nanmax(open_test) / max(final_open, 1e-12)) if np.isfinite(final_open) else float("nan"),
         "closed_loop_plateau": bool(stages.plateau_detected),
         "plateau_length": stages.as_dict()["plateau_length"],
         "plateau_exit_detected": bool(stages.plateau_exit_detected),
@@ -326,8 +372,23 @@ def _compute_metrics(records: list[dict[str, float]], stages, seed: int, config:
         "claim_C1_divergence": bool(c1_loss_divergence or c1_gain_divergence),
         "claim_C2_stages": bool(finite_final_losses and stages.plateau_detected),
         "claim_C2_three_stage": bool(finite_final_losses and stages.plateau_detected and stages.plateau_exit_detected),
+        "claim_C2_spectral_three_stage": bool(finite_final_losses and spectral_stages.three_stage_supported),
         "claim_C3_stability_transition": bool(np.isfinite(closed_radius[-1]) and stability_crossing is not None),
     }
+    metrics.update(spectral_stages.as_dict())
+    return metrics
+
+
+def _state_loss(task, state: torch.Tensor, step: int, cfg: dict[str, Any]) -> torch.Tensor:
+    if cfg.get("state_loss_reduction", "sum_state_mean_batch") in {"mean", "mean_elements"}:
+        return torch.mean(state**2)
+    return task.state_cost(state, step).mean()
+
+
+def _control_loss(action: torch.Tensor, cfg: dict[str, Any]) -> torch.Tensor:
+    if cfg.get("control_loss_reduction", "mean") == "sum":
+        return torch.sum(action**2)
+    return torch.mean(action**2)
 
 
 def _safe_nanmax(values: np.ndarray) -> float:

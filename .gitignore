@@ -14,6 +14,7 @@ dist/
 *.egg-info/
 logs/
 closed_loop_rnn_audit_anonymous_supplement.tar.gz
+15612_Learning_Dynamics_of_RNN.pdf
 
 # Local AWS result bundles and pulled logs are not part of the anonymous artifact.
 aws_results_before_pull_*/

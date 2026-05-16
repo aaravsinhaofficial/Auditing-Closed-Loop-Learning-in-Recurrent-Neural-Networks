@@ -13,6 +13,7 @@ from closed_loop_repro.io import ensure_dir, read_json
 CLAIMS = {
     "C1": "Closed-loop/open-loop divergence",
     "C2": "Closed-loop stages",
+    "C2s": "Closed-loop spectral stages",
     "C3": "Coupled-system stability transition",
     "A1": "Protocol robustness and short/long horizon tradeoff",
     "A2": "Broader generalization",
@@ -59,7 +60,11 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
 
     rows = []
     rows.append(_claim_row("C1", df, "claim_C1_loss_divergence", "deployed closed-loop loss gap >5%; gain divergence reported in diagnostics"))
-    rows.append(_claim_row("C2", df, "claim_C2_three_stage", "finite runs with algorithmic plateau and non-fallback exit detection"))
+    if "claim_C2_spectral_three_stage" in df.columns:
+        rows.append(_claim_row("C2", df, "claim_C2_spectral_three_stage", "spectral stage detector: negative-position unstable complex mode, stability crossing, and lambda3 growth"))
+        rows.append(_claim_row("C2s", df, "claim_C2_three_stage", "loss-only downstream stage detector for comparison"))
+    else:
+        rows.append(_claim_row("C2", df, "claim_C2_three_stage", "finite runs with algorithmic plateau and non-fallback exit detection"))
     rows.append(_claim_row("C3", df, "claim_C3_stability_transition", "finite coupled spectral radius crossing"))
     if "claim_C4_tradeoff_quantified" in df and df["claim_C4_tradeoff_quantified"].notna().any():
         c4_df = df[df["claim_C4_tradeoff_quantified"].notna()]
@@ -152,6 +157,8 @@ def _add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
     if "claim_C3_stability_transition" in df.columns:
         radius = pd.to_numeric(df.get("final_closed_coupled_radius", pd.Series(np.nan, index=df.index)), errors="coerce")
         df["claim_C3_stability_transition"] = _bool_series(df["claim_C3_stability_transition"]) & np.isfinite(radius)
+    if "claim_C2_spectral_three_stage" in df.columns:
+        df["claim_C2_spectral_three_stage"] = _bool_series(df["claim_C2_spectral_three_stage"]) & finite
 
     open_spike = _bool_series(df.get("open_loop_test_loss_spike", pd.Series(False, index=df.index))).fillna(False)
     recovered = _bool_series(df.get("closed_recovered", pd.Series(False, index=df.index))).fillna(False)
@@ -190,6 +197,7 @@ def _group_summary(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
                 "c1_deployed_loss_support": fraction(group["claim_C1_loss_divergence"]),
                 "c1_gain_support": fraction(group["claim_C1_gain_divergence"]),
                 "c2_stage_support": fraction(group.get("claim_C2_stages", [])),
+                "c2_spectral_stage_support": fraction(group.get("claim_C2_spectral_three_stage", [])),
                 "c3_stability_support": fraction(group.get("claim_C3_stability_transition", [])),
                 "open_loop_spike_fraction": fraction(group.get("open_loop_test_loss_spike", [])),
                 "closed_recovery_fraction": fraction(group.get("closed_recovered", [])),
