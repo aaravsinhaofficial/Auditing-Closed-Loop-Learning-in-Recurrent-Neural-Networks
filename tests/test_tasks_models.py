@@ -35,3 +35,10 @@ def test_ring_partial_observation_shape_and_moving_target():
     assert task.obs_dim == 2
     assert obs0.shape == (3, 2)
     assert not torch.allclose(obs0, obs1)
+
+
+def test_task_factory_filters_inherited_kwargs():
+    tracking = make_task({"name": "tracking", "dt": 0.1, "init_low": -2.0, "init_high": 2.0})
+    ring = make_task({"name": "ring", "dt": 0.1, "init_low": -2.0, "init_high": 2.0})
+    assert tracking.state_dim == 4
+    assert ring.state_dim == 2
