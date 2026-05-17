@@ -51,6 +51,7 @@ Equivalent individual commands:
 python -m closed_loop_repro.sweeps.seed_sweep --config configs/original/double_integrator_full.yaml
 python -m closed_loop_repro.sweeps.robustness_sweep --config configs/robustness/maximal.yaml
 python -m closed_loop_repro.sweeps.generalization_sweep --config configs/generalization/maximal.yaml
+python -m closed_loop_repro.analysis.stage_changepoints --config configs/stage/changepoint_original.yaml
 python -m closed_loop_repro.analysis.recompute_timeseries_metrics --results results/raw --out results/processed
 python -m closed_loop_repro.analysis.make_claim_tables --results results/raw --out results/processed
 python -m closed_loop_repro.analysis.supplemental_audit_tables --results results/raw --processed results/processed

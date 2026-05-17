@@ -9,6 +9,7 @@ from closed_loop_repro.analysis.spectral_stages import detect_spectral_stages
 from closed_loop_repro.analysis.stage_changepoints import _analyze_one
 from closed_loop_repro.analysis.stages import detect_stages
 from closed_loop_repro.analysis.statistics import bootstrap_ci
+from closed_loop_repro.plotting.figures import _read_csv
 
 
 def test_spectral_radius():
@@ -163,3 +164,9 @@ def test_paper_signature_check_writes_summary_and_figures(tmp_path):
     assert paths["loss_png"].exists()
     summary = pd.read_csv(paths["summary_csv"]).iloc[0]
     assert bool(summary["open_peak_signature"])
+
+
+def test_plotting_read_csv_tolerates_empty_files(tmp_path):
+    path = tmp_path / "empty.csv"
+    path.write_text("", encoding="utf-8")
+    assert _read_csv(path) is None

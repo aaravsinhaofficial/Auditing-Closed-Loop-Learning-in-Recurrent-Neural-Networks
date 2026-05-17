@@ -34,7 +34,10 @@ def make_figures(results: str | Path = "results/raw", processed: str | Path = "r
 
     claim_path = processed / "claim_reproducibility_matrix.csv"
     if claim_path.exists():
-        claim_df = pd.read_csv(claim_path)
+        claim_df = _read_csv(claim_path)
+    else:
+        claim_df = None
+    if claim_df is not None and not claim_df.empty:
         fig, ax = plt.subplots(figsize=(7, 3))
         plot_df = claim_df.copy()
         plot_df["support_fraction"] = pd.to_numeric(plot_df["support_fraction"], errors="coerce")
@@ -69,7 +72,10 @@ def _load_timeseries(experiment_dir: Path) -> list[pd.DataFrame]:
 def _read_csv(path: Path) -> pd.DataFrame | None:
     if not path.exists():
         return None
-    return pd.read_csv(path)
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return None
 
 
 def _load_tradeoff_summary(results: Path, processed: Path) -> pd.DataFrame | None:
