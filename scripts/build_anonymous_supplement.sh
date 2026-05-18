@@ -23,19 +23,18 @@ if find "$tmpdir/$prefix" -name .git -o -name .venv -o -name __pycache__ | grep 
 fi
 
 leak_patterns=(
-  "a""arav"
-  "a""aravsinha"
-  "a""aravsinhaofficial"
-  "a""aravofficial009"
-  "github.com/a""aravsinha"
   "software""heritage.org/browse/origin"
   "origin""_url="
-  "/Users/a""arav"
   "/home/""ubuntu"
   "ubuntu""@"
   "ip""-172-"
   "reproduce""_tmlr"
 )
+
+if [[ -n "${ANON_EXTRA_PATTERNS:-}" ]]; then
+  IFS=':' read -r -a extra_patterns <<< "$ANON_EXTRA_PATTERNS"
+  leak_patterns+=("${extra_patterns[@]}")
+fi
 
 for pattern in "${leak_patterns[@]}"; do
   if rg -I -n -i --glob '!external/original_artifact/**' "$pattern" "$tmpdir/$prefix" >/tmp/anonymous_supplement_leaks.txt; then
@@ -63,19 +62,15 @@ reader = PdfReader(str(path))
 metadata = " ".join(str(v) for v in (reader.metadata or {}).values()).lower()
 text = "\n".join((page.extract_text() or "") for page in reader.pages).lower()
 patterns = [
-    "a" "arav",
-    "a" "aravsinha",
-    "a" "aravsinhaofficial",
-    "a" "aravofficial009",
-    "github.com/a" "aravsinha",
     "software" "heritage.org/browse/origin",
     "origin" "_url=",
-    "/users/a" "arav",
     "/home/" "ubuntu",
     "ubuntu" "@",
     "ip" "-172-",
     "reproduce" "_tmlr",
 ]
+extra = [p.strip().lower() for p in __import__("os").environ.get("ANON_EXTRA_PATTERNS", "").split(":") if p.strip()]
+patterns.extend(extra)
 for pattern in patterns:
     if pattern in metadata or pattern in text:
         raise SystemExit(f"Potential PDF anonymity leak for pattern: {pattern}")

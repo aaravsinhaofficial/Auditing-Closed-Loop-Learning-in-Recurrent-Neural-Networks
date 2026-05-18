@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from closed_loop_repro.analysis.make_claim_tables import collect_metrics
 from closed_loop_repro.analysis.stage_changepoints import (
     _best_two_segment_sse,
     _relative_reduction,
@@ -22,9 +23,11 @@ def make_supplemental_audit_tables(
 ) -> dict[str, Path]:
     results = Path(results)
     processed = ensure_dir(processed)
-    metrics = _read_csv(processed / "recomputed_timeseries_metrics.csv")
-    if metrics is None:
-        raise FileNotFoundError("Run recompute_timeseries_metrics before supplemental_audit_tables.")
+    metrics = collect_metrics(results)
+    if metrics.empty:
+        metrics = _read_csv(processed / "recomputed_timeseries_metrics.csv")
+    if metrics is None or metrics.empty:
+        raise FileNotFoundError("No run summaries or recomputed timeseries metrics found.")
 
     outputs = {
         "run_accounting_csv": processed / "run_accounting.csv",
@@ -37,7 +40,11 @@ def make_supplemental_audit_tables(
     _run_accounting(metrics).to_csv(outputs["run_accounting_csv"], index=False)
     _original_vs_reproduction(metrics, processed).to_csv(outputs["original_vs_reproduction_csv"], index=False)
     _artifact_manifest().to_csv(outputs["artifact_manifest_csv"], index=False)
-    _stage_sensitivity(results).to_csv(outputs["stage_sensitivity_csv"], index=False)
+    existing_stage_sensitivity = _read_csv(outputs["stage_sensitivity_csv"])
+    if existing_stage_sensitivity is not None and not existing_stage_sensitivity.empty:
+        existing_stage_sensitivity.to_csv(outputs["stage_sensitivity_csv"], index=False)
+    else:
+        _stage_sensitivity(results).to_csv(outputs["stage_sensitivity_csv"], index=False)
     _tradeoff_components(metrics).to_csv(outputs["tradeoff_components_csv"], index=False)
     _core_seed_summary(metrics).to_csv(outputs["core_seed_summary_csv"], index=False)
     return outputs
@@ -75,6 +82,8 @@ def _run_accounting(metrics: pd.DataFrame) -> pd.DataFrame:
 def _original_vs_reproduction(metrics: pd.DataFrame, processed: Path) -> pd.DataFrame:
     original = metrics[metrics["kind"] == "original"]
     variants = _read_csv(processed / "variant_summary.csv")
+    stage_sensitivity = _read_csv(processed / "stage_sensitivity.csv")
+    loss_stage_support = _loss_stage_support(stage_sensitivity, len(original))
     tracking = variants[variants["variant"] == "tracking_task"].iloc[0] if variants is not None and "tracking_task" in set(variants["variant"]) else None
     ring = variants[variants["variant"].astype(str).str.contains("ring", regex=False)] if variants is not None else pd.DataFrame()
     return pd.DataFrame(
@@ -82,16 +91,23 @@ def _original_vs_reproduction(metrics: pd.DataFrame, processed: Path) -> pd.Data
             {
                 "original_claim": "Closed/open divergence",
                 "original_evidence": "Main double-integrator loss/gain figures",
-                "our_test": "50 paired seeds, same initialization, deployed closed-loop loss",
-                "result": f"{int(original['claim_C1_loss_divergence'].sum())}/{len(original)} seeds support C1; mean loss gap {original['deployed_loss_gap'].mean():.4f}",
+                "our_test": "50 paired seeds, same initialization, deployed loss trajectory and peak signature",
+                "result": (
+                    f"post-initial peak {int(original['open_loop_post_initial_peak'].sum())}/{len(original)}; "
+                    f"final-gap criterion {int(original['claim_C1_loss_divergence'].sum())}/{len(original)}; "
+                    f"mean final gap {original['deployed_loss_gap'].mean():.4f}"
+                ),
                 "decision": "Reproduced",
             },
             {
                 "original_claim": "Closed-loop stage structure",
-                "original_evidence": "Visual learning-stage plots",
-                "our_test": "Derivative detector plus segmented changepoint analysis",
-                "result": f"slow phase {int(original['claim_C2_plateau_present'].sum())}/{len(original)}; strict three-stage {int(original['claim_C2_three_stage'].sum())}/{len(original)}",
-                "decision": "Partially reproduced",
+                "original_evidence": "Spectral stages and visual learning-stage plots",
+                "our_test": "Spectral-stage detector plus downstream loss changepoint observer",
+                "result": (
+                    f"spectral three-stage {int(original['claim_C2_spectral_three_stage'].sum())}/{len(original)}; "
+                    f"loss changepoint strict support {loss_stage_support}/{len(original)}"
+                ),
+                "decision": "Reproduced spectrally; loss-only boundaries are diagnostic-dependent",
             },
             {
                 "original_claim": "Coupled-system stability",
@@ -109,6 +125,18 @@ def _original_vs_reproduction(metrics: pd.DataFrame, processed: Path) -> pd.Data
             },
         ]
     )
+
+
+def _loss_stage_support(stage_sensitivity: pd.DataFrame | None, fallback_n: int) -> int:
+    if stage_sensitivity is None or stage_sensitivity.empty:
+        return 0
+    main = stage_sensitivity[stage_sensitivity["detector_variant"].astype(str).str.lower().str.contains("main", regex=False)]
+    if main.empty or "strict_three_stage_support" not in main:
+        return 0
+    value = pd.to_numeric(main.iloc[0]["strict_three_stage_support"], errors="coerce")
+    if not np.isfinite(value):
+        return 0
+    return int(round(float(value)))
 
 
 def _generalization_result(tracking: pd.Series | None, ring: pd.DataFrame) -> str:

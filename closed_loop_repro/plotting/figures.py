@@ -27,10 +27,16 @@ def make_figures(results: str | Path = "results/raw", processed: str | Path = "r
     if tradeoff is not None and not tradeoff.empty:
         paths.append(_figure_tradeoff(tradeoff, out))
 
+    perturbation_summary = _read_csv(processed / "perturbation_summary.csv")
     setting_summary = _read_csv(processed / "recomputed_setting_summary.csv")
-    if setting_summary is not None and not setting_summary.empty:
-        paths.append(_figure_robustness_heatmap(setting_summary, out))
-        paths.append(_figure_generalization(setting_summary, processed, out))
+    robustness_source = perturbation_summary if perturbation_summary is not None and not perturbation_summary.empty else setting_summary
+    if robustness_source is not None and not robustness_source.empty:
+        paths.append(_figure_robustness_heatmap(robustness_source, out))
+
+    variant_summary = _read_csv(processed / "variant_summary.csv")
+    generalization_source = variant_summary if variant_summary is not None and not variant_summary.empty else setting_summary
+    if generalization_source is not None and not generalization_source.empty:
+        paths.append(_figure_generalization(generalization_source, processed, out))
 
     claim_path = processed / "claim_reproducibility_matrix.csv"
     if claim_path.exists():
@@ -246,7 +252,19 @@ def _plot_stage_raster(ax, details: pd.DataFrame | None, n_epochs: int, colors) 
 
 
 def _figure_robustness_heatmap(setting_summary: pd.DataFrame, out: Path) -> Path:
-    rob = setting_summary[setting_summary["kind"] == "robustness"].copy()
+    if "perturbation" in setting_summary:
+        rob = setting_summary.copy()
+        rob["setting"] = rob["perturbation"]
+    else:
+        rob = setting_summary[setting_summary["kind"] == "robustness"].copy()
+    if "c1_peak_signature_support" not in rob:
+        rob["c1_peak_signature_support"] = rob.get("open_loop_spike_fraction", 0.0)
+    if "c1_loss_support" not in rob:
+        rob["c1_loss_support"] = rob.get("c1_deployed_loss_support", 0.0)
+    if "c2_spectral_stage_support" not in rob:
+        rob["c2_spectral_stage_support"] = rob.get("c2_spectral_three_stage_support", 0.0)
+    if "c2_stage_support" not in rob:
+        rob["c2_stage_support"] = rob.get("c2_plateau_support", 0.0)
     order = [
         "original",
         "lr_low",
@@ -265,11 +283,11 @@ def _figure_robustness_heatmap(setting_summary: pd.DataFrame, out: Path) -> Path
     rob["setting"] = pd.Categorical(rob["setting"], categories=order, ordered=True)
     rob = rob.sort_values("setting")
     columns = {
-        "C1 loss": "c1_loss_support",
-        "C2 slow": "c2_plateau_support",
-        "C2 strict": "c2_three_stage_support",
+        "C1 peak": "c1_peak_signature_support",
+        "C1 final": "c1_loss_support",
+        "C2 spectral": "c2_spectral_stage_support",
+        "C2 loss-stage": "c2_stage_support",
         "C3 stability": "c3_stability_support",
-        "A1 proxy": "c4_proxy_support",
     }
     heat = rob.set_index("setting")[[*columns.values()]].rename(columns={v: k for k, v in columns.items()})
     counts = rob.set_index("setting")["n"].reindex(heat.index).fillna(0).astype(int)
@@ -433,7 +451,13 @@ def _figure_coupled_spectra(frames: list[pd.DataFrame], processed: Path, out: Pa
 
 
 def _figure_generalization(setting_summary: pd.DataFrame, processed: Path, out: Path) -> Path:
-    gen = setting_summary[setting_summary["kind"] == "generalization"].copy()
+    if "variant" in setting_summary:
+        gen = setting_summary.copy()
+        gen["setting"] = gen["variant"]
+    else:
+        gen = setting_summary[setting_summary["kind"] == "generalization"].copy()
+    if "c1_loss_support" not in gen:
+        gen["c1_loss_support"] = gen.get("c1_deployed_loss_support", 0.0)
     metrics = _read_csv(processed / "recomputed_timeseries_metrics.csv")
     if metrics is not None and not metrics.empty:
         metrics = metrics[metrics["kind"] == "generalization"].copy()
@@ -471,6 +495,8 @@ def _figure_generalization(setting_summary: pd.DataFrame, processed: Path, out: 
     axes[0].set(ylim=(0, 1.14), ylabel="C1 support fraction", xlabel="Variant")
 
     all_gaps = []
+    display_cap = 1e3
+    clipped_points = 0
     for idx, row in gen.reset_index(drop=True).iterrows():
         setting = str(row["setting"])
         if metrics is not None and not metrics.empty:
@@ -480,10 +506,20 @@ def _figure_generalization(setting_summary: pd.DataFrame, processed: Path, out: 
         gaps = gaps[np.isfinite(gaps)]
         if gaps.size == 0:
             continue
-        all_gaps.extend(gaps.tolist())
+        all_gaps.extend(np.clip(gaps, -display_cap, display_cap).tolist())
         offsets = np.linspace(-0.13, 0.13, len(gaps)) if len(gaps) > 1 else np.array([0.0])
-        axes[1].scatter(np.full(len(gaps), idx) + offsets, gaps, color=colors[idx], s=18, alpha=0.55, linewidths=0, zorder=2)
-        axes[1].scatter(idx, np.mean(gaps), color=colors[idx], s=62, marker="D", edgecolor="white", linewidth=0.8, zorder=4)
+        clipped_hi = gaps > display_cap
+        clipped_lo = gaps < -display_cap
+        clipped_points += int(clipped_hi.sum() + clipped_lo.sum())
+        displayed = np.clip(gaps, -display_cap, display_cap)
+        axes[1].scatter(np.full(len(gaps), idx) + offsets, displayed, color=colors[idx], s=18, alpha=0.55, linewidths=0, zorder=2)
+        if clipped_hi.any():
+            axes[1].scatter(np.full(int(clipped_hi.sum()), idx) + offsets[clipped_hi], np.full(int(clipped_hi.sum()), display_cap), color=colors[idx], s=28, marker="^", edgecolor="0.15", linewidth=0.3, zorder=3)
+        if clipped_lo.any():
+            axes[1].scatter(np.full(int(clipped_lo.sum()), idx) + offsets[clipped_lo], np.full(int(clipped_lo.sum()), -display_cap), color=colors[idx], s=28, marker="v", edgecolor="0.15", linewidth=0.3, zorder=3)
+        mean_gap = float(np.nanmean(gaps))
+        displayed_mean = float(np.clip(mean_gap, -display_cap, display_cap))
+        axes[1].scatter(idx, displayed_mean, color=colors[idx], s=62, marker="D", edgecolor="white", linewidth=0.8, zorder=4)
     axes[1].axhline(0, color="0.2", lw=0.8)
     axes[1].set_xticks(x, [labels.get(str(v), str(v)) for v in gen["setting"]], rotation=25, ha="right")
     axes[1].set_yscale("symlog", linthresh=1e-3, linscale=0.7)
@@ -503,7 +539,9 @@ def _figure_generalization(setting_summary: pd.DataFrame, processed: Path, out: 
             fontsize=8,
             ha="right",
         )
-    axes[1].set(ylabel="Seed deployed-loss gap (symlog)", xlabel="Variant")
+    if clipped_points:
+        axes[1].text(0.98, 0.96, f"{clipped_points} clipped\nat 1e3", transform=axes[1].transAxes, ha="right", va="top", fontsize=8, bbox={"facecolor": "white", "edgecolor": "0.85", "pad": 2.5})
+    axes[1].set(ylabel="Seed deployed-loss gap (symlog, clipped)", xlabel="Variant")
     sns.despine(fig)
     fig.tight_layout()
     path = out / "figure_6_generalization.png"

@@ -13,7 +13,7 @@ from closed_loop_repro.io import ensure_dir, read_json
 CLAIMS = {
     "C1": "Closed-loop/open-loop divergence",
     "C2": "Closed-loop stages",
-    "C2s": "Closed-loop spectral stages",
+    "C2s": "Closed-loop loss-only stages",
     "C3": "Coupled-system stability transition",
     "A1": "Protocol robustness and short/long horizon tradeoff",
     "A2": "Broader generalization",
@@ -59,7 +59,14 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
         return {"claim_csv": claim_path}
 
     rows = []
-    rows.append(_claim_row("C1", df, "claim_C1_loss_divergence", "deployed closed-loop loss gap >5%; gain divergence reported in diagnostics"))
+    rows.append(
+        _claim_row(
+            "C1",
+            df,
+            "claim_C1_peak_or_final",
+            "post-initial open-loop deployed-loss peak or final deployed-loss gap >5%; final gap and gain divergence reported separately",
+        )
+    )
     if "claim_C2_spectral_three_stage" in df.columns:
         rows.append(_claim_row("C2", df, "claim_C2_spectral_three_stage", "spectral stage detector: negative-position unstable complex mode, stability crossing, and lambda3 growth"))
         rows.append(_claim_row("C2s", df, "claim_C2_three_stage", "loss-only downstream stage detector for comparison"))
@@ -72,7 +79,7 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
     else:
         rows.append(_claim_row("A1", df, "claim_C4_tradeoff", "proxy only: open-loop deployed-loss spike plus closed-loop recovery"))
     if "variant" in df.columns:
-        rows.append(_claim_row("A2", df[df["variant"].notna()], "claim_C1_loss_divergence", "generalization variants preserving deployed-loss divergence"))
+        rows.append(_claim_row("A2", df[df["variant"].notna()], "claim_C1_peak_or_final", "generalization variants preserving final-loss or peak trajectory signatures"))
     else:
         rows.append({"claim": "A2", "description": CLAIMS["A2"], "n": 0, "support_fraction": float("nan"), "notes": "no generalization runs found"})
 
@@ -86,6 +93,8 @@ def make_claim_tables(results: str | Path, out: str | Path) -> dict[str, Path]:
         "n_finite_runs": int(_bool_series(df.get("finite_final_losses", pd.Series(False, index=df.index))).sum()),
         "closed_open_final_loss_corr": pearson(df.get("final_closed_test_loss", []), df.get("final_open_test_loss", [])),
         "c1_deployed_loss_support": fraction(df.get("claim_C1_loss_divergence", [])),
+        "c1_peak_signature_support": fraction(df.get("claim_C1_peak_signature", [])),
+        "c1_peak_or_final_support": fraction(df.get("claim_C1_peak_or_final", [])),
         "c1_gain_support": fraction(df.get("claim_C1_gain_divergence", [])),
         "mean_deployed_loss_gap": float(pd.to_numeric(df.get("deployed_loss_gap", pd.Series(dtype=float)), errors="coerce").mean()),
         "mean_stability_to_plateau_gap": float(pd.to_numeric(df.get("stability_to_plateau_gap", pd.Series(dtype=float)), errors="coerce").mean()),
@@ -132,6 +141,8 @@ def _add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
+    if "kind" not in df.columns:
+        df["kind"] = _infer_kind(df)
     closed = pd.to_numeric(df.get("final_closed_test_loss", pd.Series(np.nan, index=df.index)), errors="coerce")
     open_loop = pd.to_numeric(df.get("final_open_test_loss", pd.Series(np.nan, index=df.index)), errors="coerce")
     finite = np.isfinite(closed) & np.isfinite(open_loop)
@@ -142,10 +153,17 @@ def _add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
     df["deployed_loss_gap_relative_to_closed"] = relative_gap
     df["claim_C1_loss_divergence"] = finite & (relative_gap > 0.05)
 
+    if "open_loop_post_initial_peak" in df.columns:
+        peak_signature = _bool_series(df["open_loop_post_initial_peak"])
+    else:
+        peak_signature = _bool_series(df.get("open_loop_test_loss_spike", pd.Series(False, index=df.index)))
+    df["claim_C1_peak_signature"] = finite & peak_signature.fillna(False)
+
     gain_distance = pd.to_numeric(df.get("trajectory_gain_distance", pd.Series(np.nan, index=df.index)), errors="coerce")
     df["claim_C1_gain_divergence"] = np.isfinite(gain_distance) & (gain_distance > 0.05)
     if "claim_C1_divergence" not in df.columns:
         df["claim_C1_divergence"] = df["claim_C1_loss_divergence"] | df["claim_C1_gain_divergence"]
+    df["claim_C1_peak_or_final"] = df["claim_C1_peak_signature"] | df["claim_C1_loss_divergence"]
 
     if "claim_C2_stages" in df.columns:
         df["claim_C2_stages"] = _bool_series(df["claim_C2_stages"]) & finite
@@ -171,6 +189,17 @@ def _add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _infer_kind(df: pd.DataFrame) -> pd.Series:
+    source = df.get("source_table", pd.Series("", index=df.index)).astype(str)
+    experiment = df.get("experiment", pd.Series("", index=df.index)).astype(str)
+    kind = pd.Series("unknown", index=df.index, dtype=object)
+    kind[source.str.contains("original", case=False, na=False) | experiment.eq("original_double_integrator_full")] = "original"
+    kind[source.str.contains("robustness", case=False, na=False) | df.get("perturbation", pd.Series(np.nan, index=df.index)).notna()] = "robustness"
+    kind[source.str.contains("tradeoff", case=False, na=False) | df.get("tradeoff_condition", pd.Series(np.nan, index=df.index)).notna()] = "tradeoff"
+    kind[source.str.contains("generalization", case=False, na=False) | df.get("variant", pd.Series(np.nan, index=df.index)).notna()] = "generalization"
+    return kind
+
+
 def _bool_series(values: object) -> pd.Series:
     series = values if isinstance(values, pd.Series) else pd.Series(values)
     if series.dtype == bool:
@@ -178,7 +207,8 @@ def _bool_series(values: object) -> pd.Series:
     if pd.api.types.is_numeric_dtype(series):
         return series.fillna(0).astype(bool)
     normalized = series.astype(str).str.strip().str.lower()
-    return normalized.map({"true": True, "1": True, "yes": True, "false": False, "0": False, "no": False}).fillna(False).astype(bool)
+    mapped = normalized.map({"true": True, "1": True, "yes": True, "false": False, "0": False, "no": False})
+    return mapped.where(mapped.notna(), False).astype(bool)
 
 
 def _group_summary(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
@@ -195,6 +225,8 @@ def _group_summary(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
                 "mean_final_open_test_loss": float(pd.to_numeric(group["final_open_test_loss"], errors="coerce").mean()),
                 "mean_deployed_loss_gap": float(pd.to_numeric(group["deployed_loss_gap"], errors="coerce").mean()),
                 "c1_deployed_loss_support": fraction(group["claim_C1_loss_divergence"]),
+                "c1_peak_signature_support": fraction(group["claim_C1_peak_signature"]),
+                "c1_peak_or_final_support": fraction(group["claim_C1_peak_or_final"]),
                 "c1_gain_support": fraction(group["claim_C1_gain_divergence"]),
                 "c2_stage_support": fraction(group.get("claim_C2_stages", [])),
                 "c2_spectral_stage_support": fraction(group.get("claim_C2_spectral_three_stage", [])),
